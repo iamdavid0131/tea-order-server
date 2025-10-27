@@ -52,6 +52,8 @@ bower_components
 # Service account key
 service-account-key.json
 *.json
+!package.json
+!package-lock.json
 
 # dotenv environment variables file
 .env.test
