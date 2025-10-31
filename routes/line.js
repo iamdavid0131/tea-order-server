@@ -2,7 +2,6 @@ import express from 'express';
 import { lineReply, verifyLineSignature } from '../lib/line.js';
 import { normalizePhoneTW } from '../lib/utils.js';
 import { findMemberByLine } from '../lib/member.js';
-import { getRecentOrderByPhone } from '../lib/sheets.js';
 import { buildMemberTierFlex, buildOrderFlex } from '../lib/lineFlex.js';
 
 const router = express.Router();
@@ -50,7 +49,7 @@ async function handleEvent(event) {
       if (!member) return lineReply(replyToken, { type: 'text', text: '請先輸入「綁定 09xxxxxxxx」完成綁定。' });
 
       const phone = normalizePhoneTW(member.phone);
-      const order = await getRecentOrderByPhone(phone);
+      const order = await findMemberByLine(phone);
       if (!order) return lineReply(replyToken, { type: 'text', text: '找不到您的訂單紀錄。' });
 
       const flex = buildOrderFlex({
