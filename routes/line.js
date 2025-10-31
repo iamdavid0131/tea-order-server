@@ -1,7 +1,8 @@
 import express from 'express';
 import { lineReply, verifyLineSignature } from '../lib/line.js';
 import { normalizePhoneTW } from '../lib/utils.js';
-import { getMemberByLineId, getRecentOrderByPhone } from '../lib/sheets.js';
+import { findMemberByLine } from '../lib/member.js';
+import { getRecentOrderByPhone } from '../lib/sheets.js';
 import { buildMemberTierFlex, buildOrderFlex } from '../lib/lineFlex.js';
 
 const router = express.Router();
@@ -39,13 +40,13 @@ async function handleEvent(event) {
       }
 
       // 更新會員資料
-      const result = await getMemberByLineId(userId, phone, true);
+      const result = await findMemberByLine(userId, phone, true);
       return lineReply(replyToken, { type: 'text', text: result.message });
     }
 
     // 🔹 查訂單
     if (/^(查訂單|查单|查订单|查單)$/.test(text)) {
-      const member = await getMemberByLineId(userId);
+      const member = await findMemberByLine(userId);
       if (!member) return lineReply(replyToken, { type: 'text', text: '請先輸入「綁定 09xxxxxxxx」完成綁定。' });
 
       const phone = normalizePhoneTW(member.phone);
