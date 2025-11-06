@@ -99,13 +99,15 @@ router.get('/near', async (req, res) => {
       return res.status(500).json({ ok: false, error: '缺少 GOOGLE_MAPS_API_KEY' });
     }
 
-    // ✅ 如果是全部品牌則不加關鍵字
+
+    // ✅ 如果是全部品牌 → 指定搜尋便利商店
     const keyword =
       brand === "all"
-        ? ""
+        ? "便利商店"
         : brand === "familymart"
         ? "全家 FamilyMart"
         : "7-11";
+
 
     const endpoint = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?keyword=${encodeURIComponent(
       keyword
