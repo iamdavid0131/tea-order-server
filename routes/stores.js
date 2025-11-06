@@ -126,6 +126,7 @@ router.get('/near', async (req, res) => {
       placeId: p.place_id,
       lat: p.geometry?.location.lat,
       lng: p.geometry?.location.lng,
+      distance: p.distance_meters || null
     }));
 
     res.json({ ok: true, stores });
