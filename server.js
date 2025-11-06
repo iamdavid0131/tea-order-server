@@ -33,6 +33,7 @@ app.use('/api/member', memberRouter);
 app.use('/api/line-login', lineLoginRouter);
 app.use('/api/cleanup-coupons', cleanupCouponsRouter);
 
+
 // === Root route ===
 app.get('/', (_, res) => {
   const apiEndpoints = [

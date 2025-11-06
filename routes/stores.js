@@ -14,13 +14,16 @@ router.get('/search', async (req, res) => {
     const lat = req.query.lat;
     const lng = req.query.lng;
 
-    if (!q) return res.status(400).json({ ok: false, error: '缺少查詢關鍵字 q' });
     if (!GOOGLE_MAPS_API_KEY) return res.status(500).json({ ok: false, error: '缺少 GOOGLE_MAPS_API_KEY' });
 
     // Google Places Nearby Search or Text Search
+    const radius = req.query.radius || 1000
+    const brand = req.query.brand || ""
+    const keyword = encodeURIComponent(`${brand} ${q}`)
+
     const endpoint = lat && lng
-      ? `https://maps.googleapis.com/maps/api/place/nearbysearch/json?keyword=${encodeURIComponent(q)}&location=${lat},${lng}&radius=3000&key=${GOOGLE_MAPS_API_KEY}`
-      : `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}&key=${GOOGLE_MAPS_API_KEY}`;
+        ? `https://maps.googleapis.com/maps/api/place/nearbysearch/json?keyword=${keyword}&location=${lat},${lng}&radius=${radius}&key=${GOOGLE_MAPS_API_KEY}`
+        : `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${keyword}&key=${GOOGLE_MAPS_API_KEY}`;
 
     const response = await fetch(endpoint);
     const json = await response.json();
@@ -54,7 +57,7 @@ router.get('/detail', async (req, res) => {
     const placeId = req.query.placeId;
     if (!placeId) return res.status(400).json({ ok: false, error: '缺少 placeId' });
 
-    const endpoint = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry,opening_hours,formatted_phone_number&language=zh-TW&key=${GOOGLE_API_KEY}`;
+    const endpoint = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry,opening_hours,formatted_phone_number&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
     const response = await fetch(endpoint);
     const json = await response.json();
 
@@ -77,5 +80,58 @@ router.get('/detail', async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+/**
+ * 📍 搜尋附近門市
+ * GET /stores/near?lat=24.25&lng=120.53&brand=7-11&radius=1000
+ */
+router.get('/near', async (req, res) => {
+  try {
+    const lat = req.query.lat;
+    const lng = req.query.lng;
+    const radius = req.query.radius || 1000;
+    const brand = req.query.brand || "all";
+
+    if (!lat || !lng) {
+      return res.status(400).json({ ok: false, error: "缺少座標 lat/lng" });
+    }
+    if (!GOOGLE_MAPS_API_KEY) {
+      return res.status(500).json({ ok: false, error: '缺少 GOOGLE_MAPS_API_KEY' });
+    }
+
+    // ✅ 如果是全部品牌則不加關鍵字
+    const keyword =
+      brand === "all"
+        ? ""
+        : brand === "familymart"
+        ? "全家 FamilyMart"
+        : "7-11";
+
+    const endpoint = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?keyword=${encodeURIComponent(
+      keyword
+    )}&location=${lat},${lng}&radius=${radius}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+
+    const response = await fetch(endpoint);
+    const json = await response.json();
+
+    if (!json.results?.length) {
+      return res.json({ ok: false, stores: [] });
+    }
+
+    const stores = json.results.map((p) => ({
+      name: p.name,
+      address: p.vicinity || "",
+      placeId: p.place_id,
+      lat: p.geometry?.location.lat,
+      lng: p.geometry?.location.lng,
+    }));
+
+    res.json({ ok: true, stores });
+  } catch (err) {
+    console.error("[stores/near] error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 
 export default router;
