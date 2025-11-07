@@ -99,22 +99,23 @@ router.get('/near', async (req, res) => {
       return res.status(500).json({ ok: false, error: '缺少 GOOGLE_MAPS_API_KEY' });
     }
 
-
-    // ✅ 如果是全部品牌 → 指定搜尋便利商店
-    const keyword =
-      brand === "all"
-        ? "便利商店"
-        : brand === "familymart"
-        ? "全家 FamilyMart"
-        : "7-11";
-
+    // ✅ keyword + type 提高命中率
+    let keyword = "便利商店";
+    if (brand === "7-11" || /7-?ELEVEN/i.test(brand)) {
+      keyword = "7-ELEVEN";
+    } else if (/family/i.test(brand) || brand === "familymart") {
+      keyword = "全家 FamilyMart";
+    }
 
     const endpoint = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?keyword=${encodeURIComponent(
       keyword
-    )}&location=${lat},${lng}&radius=${radius}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+    )}&location=${lat},${lng}&radius=${radius}&type=convenience_store&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
 
     const response = await fetch(endpoint);
     const json = await response.json();
+
+    // 🔍 除錯輸出
+    console.log("🗺️ Google Places 回傳筆數：", json.results?.length || 0);
 
     if (!json.results?.length) {
       return res.json({ ok: false, stores: [] });
@@ -135,6 +136,7 @@ router.get('/near', async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
 
 
 export default router;
