@@ -71,6 +71,7 @@ router.get("/landmark", async (req, res) => {
   try {
     const q = req.query.q;
     const radius = req.query.radius || 800;
+    const brand = req.query.brand || "all";
 
     if (!q)
       return res.status(400).json({ ok: false, error: "缺少 q" });
@@ -90,7 +91,15 @@ router.get("/landmark", async (req, res) => {
     const { lat, lng } = geoData.results[0].geometry.location;
 
     // 2️⃣ 分別搜尋 7-ELEVEN 與全家，再合併結果
-    const keywords = ["7-ELEVEN", "全家 FamilyMart"];
+        // 根據品牌查詢
+    let keywords = [];
+    if (brand === "all") {
+      keywords = ["7-ELEVEN", "全家 FamilyMart"];
+    } else if (brand === "7-11") {
+      keywords = ["7-ELEVEN"];
+    } else if (brand === "familymart") {
+      keywords = ["全家 FamilyMart"];
+    }
     const allResults = [];
 
     for (const kw of keywords) {
