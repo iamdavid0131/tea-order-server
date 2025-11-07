@@ -70,13 +70,15 @@ router.get("/near", async (req, res) => {
 router.get("/landmark", async (req, res) => {
   try {
     const q = req.query.q;
-    const radius = req.query.radius || 800;
     const brand = req.query.brand || "all";
 
     if (!q)
       return res.status(400).json({ ok: false, error: "缺少 q" });
     if (!GOOGLE_MAPS_API_KEY)
       return res.status(500).json({ ok: false, error: "缺少 GOOGLE_MAPS_API_KEY" });
+
+    // 預設 radius = 800 公尺
+    const radius = 800;
 
     // 1️⃣ 將地標轉成座標
     const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
@@ -90,8 +92,7 @@ router.get("/landmark", async (req, res) => {
 
     const { lat, lng } = geoData.results[0].geometry.location;
 
-    // 2️⃣ 分別搜尋 7-ELEVEN 與全家，再合併結果
-        // 根據品牌查詢
+    // 2️⃣ 根據品牌查詢
     let keywords = [];
     if (brand === "all") {
       keywords = ["7-ELEVEN", "全家 FamilyMart"];
@@ -100,25 +101,21 @@ router.get("/landmark", async (req, res) => {
     } else if (brand === "familymart") {
       keywords = ["全家 FamilyMart"];
     }
-    const allResults = [];
 
+    const allResults = [];
     for (const kw of keywords) {
       const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?keyword=${encodeURIComponent(
         kw
       )}&location=${lat},${lng}&radius=${radius}&type=convenience_store&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
       const resp = await fetch(url);
       const data = await resp.json();
-
-      if (data.results?.length) {
-        allResults.push(...data.results);
-      }
+      if (data.results?.length) allResults.push(...data.results);
     }
 
-    if (!allResults.length) {
+    if (!allResults.length)
       return res.json({ ok: false, stores: [], lat, lng });
-    }
 
-    // 3️⃣ 整理回傳格式並去除重複店名
+    // 3️⃣ 整理資料
     const seen = new Set();
     const stores = allResults
       .map((p) => ({
@@ -135,15 +132,14 @@ router.get("/landmark", async (req, res) => {
         return true;
       });
 
-    // 4️⃣ 回傳結果
-    console.log(`[landmark] ${q} 周圍找到 ${stores.length} 間店`);
+    console.log(`[landmark] ${q} (${brand}) 周圍找到 ${stores.length} 間店`);
     res.json({ ok: true, lat, lng, stores });
-
   } catch (err) {
     console.error("[stores/landmark] error:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
 
 
 /* ============================================================
