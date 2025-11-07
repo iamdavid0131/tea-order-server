@@ -94,6 +94,10 @@ router.get("/landmark", async (req, res) => {
     const response = await fetch(endpoint);
     const json = await response.json();
 
+    console.log("📡 Google URL:", endpoint);
+    console.log("📬 Google Response Status:", json.status);
+    console.log("📦 Google Result Count:", json.results?.length || 0);
+
     if (!json.results?.length)
       return res.json({ ok: false, stores: [], lat, lng });
 
