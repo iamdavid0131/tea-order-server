@@ -77,7 +77,7 @@ router.get("/landmark", async (req, res) => {
     if (!GOOGLE_MAPS_API_KEY)
       return res.status(500).json({ ok: false, error: "缺少 GOOGLE_MAPS_API_KEY" });
 
-    // 1️⃣ 先將地標轉成座標
+    // 1️⃣ 將地標轉成座標
     const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
       q
     )}&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
@@ -89,32 +89,53 @@ router.get("/landmark", async (req, res) => {
 
     const { lat, lng } = geoData.results[0].geometry.location;
 
-    // 2️⃣ 再查該地標周圍的便利商店
-    const endpoint = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?keyword=便利商店&location=${lat},${lng}&radius=${radius}&type=convenience_store&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
-    const response = await fetch(endpoint);
-    const json = await response.json();
+    // 2️⃣ 分別搜尋 7-ELEVEN 與全家，再合併結果
+    const keywords = ["7-ELEVEN", "全家 FamilyMart"];
+    const allResults = [];
 
-    console.log("📡 Google URL:", endpoint);
-    console.log("📬 Google Response Status:", json.status);
-    console.log("📦 Google Result Count:", json.results?.length || 0);
+    for (const kw of keywords) {
+      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?keyword=${encodeURIComponent(
+        kw
+      )}&location=${lat},${lng}&radius=${radius}&type=convenience_store&language=zh-TW&key=${GOOGLE_MAPS_API_KEY}`;
+      const resp = await fetch(url);
+      const data = await resp.json();
 
-    if (!json.results?.length)
+      if (data.results?.length) {
+        allResults.push(...data.results);
+      }
+    }
+
+    if (!allResults.length) {
       return res.json({ ok: false, stores: [], lat, lng });
+    }
 
-    const stores = json.results.map((p) => ({
-      name: p.name,
-      address: p.vicinity || "",
-      placeId: p.place_id,
-      lat: p.geometry?.location.lat,
-      lng: p.geometry?.location.lng,
-    }));
+    // 3️⃣ 整理回傳格式並去除重複店名
+    const seen = new Set();
+    const stores = allResults
+      .map((p) => ({
+        name: p.name,
+        address: p.vicinity || "",
+        placeId: p.place_id,
+        lat: p.geometry?.location.lat,
+        lng: p.geometry?.location.lng,
+      }))
+      .filter((s) => {
+        const key = `${s.name}-${s.address}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
+    // 4️⃣ 回傳結果
+    console.log(`[landmark] ${q} 周圍找到 ${stores.length} 間店`);
     res.json({ ok: true, lat, lng, stores });
+
   } catch (err) {
     console.error("[stores/landmark] error:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
 
 /* ============================================================
    📍 3️⃣ 查詢單一門市詳細資料
