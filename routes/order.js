@@ -120,7 +120,12 @@ router.post("/submit", async (req, res) => {
         .map((m) => [m[1], m[2]]);
       const payload = Object.fromEntries(inputs);
 
-      console.log("✅ 綠界表單已產生：", orderId, "➡️ action:", actionUrl);
+      console.log("✅ 綠界表單已產生：", orderId);
+      console.log("🔍 回傳給前端的 JSON：", {
+        ok: true,
+        orderId,
+        ecpay: { action: actionUrl, payload },
+      });
 
       return res.json({
         ok: true,
