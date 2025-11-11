@@ -86,9 +86,13 @@ router.post("/submit", async (req, res) => {
     if (order.paymentMethod && order.paymentMethod !== "cod") {
       const ecpay = new ecpay_payment({
         operationMode: "Test", // ⚠️ 上線請改 "Production"
-        merchantID: process.env.ECPAY_MERCHANT_ID,
-        hashKey: process.env.ECPAY_HASH_KEY,
-        hashIV: process.env.ECPAY_HASH_IV,
+        MercProfile: {
+          MerchantID: process.env.ECPAY_MERCHANT_ID,
+          HashKey: process.env.ECPAY_HASH_KEY,
+          HashIV: process.env.ECPAY_HASH_IV,
+        },
+        IgnorePayment: [],
+        isProjectContractor: false,
       });
 
       const base_param = {
