@@ -104,10 +104,24 @@ router.post("/submit", async (req, res) => {
       ChoosePayment: "ALL",
     };
 
-    const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
-    console.log("✅ 綠界表單已產生：", orderId);
-    return res.json({ ok: true, orderId, paymentForm: htmlForm });
-  }
+         const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
+
+      // ✅ 抽取 action URL + 欄位
+      const actionMatch = htmlForm.match(/action="([^"]+)"/);
+      const inputs = [...htmlForm.matchAll(/name="([^"]+)" value="([^"]*)"/g)]
+        .map((m) => [m[1], m[2]]);
+      const payload = Object.fromEntries(inputs);
+
+      console.log("✅ 綠界表單已產生：", orderId);
+      return res.json({
+        ok: true,
+        orderId,
+        ecpay: {
+          action: actionMatch?.[1] || "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5",
+          payload,
+        },
+      });
+    }
 
      
 
