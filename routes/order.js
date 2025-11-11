@@ -107,11 +107,18 @@ router.post("/submit", async (req, res) => {
 
       const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
 
+      // ✅ 手動補上正確的 action URL
+      const ecpayAction = "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5";
+      const fixedHtml = htmlForm.replace(
+        /action="[^"]*"/,
+        `action="${ecpayAction}"`
+      );
+
       console.log("✅ 綠界表單已產生：", orderId);
       return res.json({
         ok: true,
         orderId,
-        paymentForm: htmlForm, // ✅ 直接傳給前端整段 HTML
+        paymentForm: fixedHtml, // ✅ 直接傳給前端整段 HTML
       });
     }
 
