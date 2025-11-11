@@ -80,36 +80,33 @@ router.post("/submit", async (req, res) => {
       requestBody: { values: [newRow] },
     });
 
-    // === 若為線上支付（非貨到付款） ===
-    if (order.paymentMethod && order.paymentMethod !== "cod") {
-      const ecpay = new ecpay_payment({
-        operationMode: "Test", // ⚠️ 上線請改成 "Production"
-        mercProfile: {
-          MerchantID: process.env.ECPAY_MERCHANT_ID,
-          HashKey: process.env.ECPAY_HASH_KEY,
-          HashIV: process.env.ECPAY_HASH_IV,
-        },
-        IgnorePayment: [],
-        isProjectContractor: false,
-      });
+   // === 若為線上支付（非貨到付款） ===
+if (order.paymentMethod && order.paymentMethod !== "cod") {
+  const ecpay = new ecpay_payment({
+    operationMode: "Test", // ⚠️ 上線請改成 "Production"
+    MerchantID: process.env.ECPAY_MERCHANT_ID,
+    HashKey: process.env.ECPAY_HASH_KEY,
+    HashIV: process.env.ECPAY_HASH_IV,
+    IgnorePayment: [],
+    isProjectContractor: false,
+  });
 
-      const base_param = {
-        MerchantTradeNo: orderId,
-        MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
-        TotalAmount: order.total,
-        TradeDesc: "祥興茶行訂單",
-        ItemName: order.items.map((i) => i.name || "").join("#") || "茶葉商品",
-        ReturnURL: process.env.ECPAY_RETURN_URL,
-        ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
-        ChoosePayment: "ALL",
-      };
+  const base_param = {
+    MerchantTradeNo: orderId,
+    MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
+    TotalAmount: order.total,
+    TradeDesc: "祥興茶行訂單",
+    ItemName: order.items.map(i => i.name || "").join("#") || "茶葉商品",
+    ReturnURL: process.env.ECPAY_RETURN_URL,
+    ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
+    ChoosePayment: "ALL",
+  };
 
-      // ⚠️ 舊版 SDK 的寫法如下（多了一層 payment_client）
-      const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
-      console.log("✅ 綠界表單已產生：", orderId);
-      return res.json({ ok: true, orderId, paymentForm: htmlForm });
-    }
-
+  // ✅ 新版 SDK 呼叫方式（v1.2.2）
+  const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
+  console.log("✅ 綠界表單已產生：", orderId);
+  return res.json({ ok: true, orderId, paymentForm: htmlForm });
+}
      
 
     // === 貨到付款 ===
