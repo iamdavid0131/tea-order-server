@@ -83,13 +83,15 @@ router.post("/submit", async (req, res) => {
     // === 若為線上支付（非貨到付款） ===
     if (order.paymentMethod && order.paymentMethod !== "cod") {
       const ecpay = new ecpay_payment({
-      operationMode: "Test", // ⚠️ 上線請改 "Production"
-      MerchantID: process.env.ECPAY_MERCHANT_ID,
-      HashKey: process.env.ECPAY_HASH_KEY,
-      HashIV: process.env.ECPAY_HASH_IV,
-      IgnorePayment: [],
-      isProjectContractor: false,
-    });
+        operationMode: "Test", // ⚠️ 上線請改成 "Production"
+        mercProfile: {
+          MerchantID: process.env.ECPAY_MERCHANT_ID,
+          HashKey: process.env.ECPAY_HASH_KEY,
+          HashIV: process.env.ECPAY_HASH_IV,
+        },
+        IgnorePayment: [],
+        isProjectContractor: false,
+      });
 
       const base_param = {
         MerchantTradeNo: orderId,
@@ -99,15 +101,16 @@ router.post("/submit", async (req, res) => {
         ItemName: order.items.map((i) => i.name || "").join("#") || "茶葉商品",
         ReturnURL: process.env.ECPAY_RETURN_URL,
         ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
-        ChoosePayment: "Credit", // 🔹只啟用信用卡一次付
+        ChoosePayment: "ALL",
       };
 
-      // ✅ 呼叫 Server-to-Server API（不回傳 HTML）
-      const tradeInfo = ecpay.payment_client.aio_check_out_credit_onetime(base_param);
-
-      console.log("✅ 綠界交易建立成功：", orderId);
-      return res.json({ ok: true, orderId, tradeInfo });
+      // ⚠️ 舊版 SDK 的寫法如下（多了一層 payment_client）
+      const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
+      console.log("✅ 綠界表單已產生：", orderId);
+      return res.json({ ok: true, orderId, paymentForm: htmlForm });
     }
+
+     
 
     // === 貨到付款 ===
     await sendOrderNotification({
