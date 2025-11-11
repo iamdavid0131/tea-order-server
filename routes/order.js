@@ -8,7 +8,7 @@ const router = express.Router();
 
 /**
  * 🧾 前端送出訂單：寫入 Google Sheets 的 Orders 表
- * ✅ 支援逐品項數量對應各欄位 + 綠界線上支付整合
+ * ✅ 支援逐品項數量對應各欄位 + 綠界 Server-to-Server 線上支付
  */
 router.post("/submit", async (req, res) => {
   try {
@@ -46,24 +46,23 @@ router.post("/submit", async (req, res) => {
       PaymentTime: order.paymentTime || "",
     };
 
-    // === 初始化所有商品欄位為 0 ===
+    // === 初始化商品欄位 ===
     headers.forEach((h) => {
       if (h.includes("_數量") || h.includes("_裝罐")) rowMap[h] = 0;
     });
 
-    // === 依品項名稱填入對應數量與裝罐 ===
+    // === 逐品項填入 ===
     for (const item of order.items || []) {
       const name = item.name?.trim() || "";
       const qty = Number(item.qty) || 0;
       const pack = item.pack ? 1 : 0;
       const qtyKey = `${name}_數量`;
       const packKey = `${name}_裝罐`;
-
       if (headers.includes(qtyKey)) rowMap[qtyKey] = qty;
       if (headers.includes(packKey)) rowMap[packKey] = pack;
     }
 
-    // === 加上金額區 ===
+    // === 金額 ===
     rowMap["PricingPolicy"] = JSON.stringify(order.pricingPolicy || {});
     rowMap["Subtotal"] = order.subtotal || 0;
     rowMap["Discount"] = order.discount || 0;
@@ -71,7 +70,6 @@ router.post("/submit", async (req, res) => {
     rowMap["Total"] = order.total || 0;
     rowMap["Status"] = "created";
 
-    // === 組成 row ===
     const newRow = headers.map((h) => rowMap[h] ?? "");
 
     // === 寫入 Google Sheets ===
@@ -82,17 +80,15 @@ router.post("/submit", async (req, res) => {
       requestBody: { values: [newRow] },
     });
 
-    // === 若為線上支付（非貨到付款） → 建立綠界交易 ===
+    // === 若為線上支付（非貨到付款） ===
     if (order.paymentMethod && order.paymentMethod !== "cod") {
       const ecpay = new ecpay_payment({
         operationMode: "Test", // ⚠️ 上線請改 "Production"
-        MercProfile: {
+        mercProfile: {
           MerchantID: process.env.ECPAY_MERCHANT_ID,
           HashKey: process.env.ECPAY_HASH_KEY,
           HashIV: process.env.ECPAY_HASH_IV,
         },
-        IgnorePayment: [],
-        isProjectContractor: false,
       });
 
       const base_param = {
@@ -103,15 +99,17 @@ router.post("/submit", async (req, res) => {
         ItemName: order.items.map((i) => i.name || "").join("#") || "茶葉商品",
         ReturnURL: process.env.ECPAY_RETURN_URL,
         ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
-        ChoosePayment: "ALL",
+        ChoosePayment: "Credit", // 🔹只啟用信用卡一次付
       };
 
-      const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
-      console.log("✅ 綠界表單已產生：", orderId);
-      return res.json({ ok: true, orderId, paymentForm: htmlForm });
+      // ✅ 呼叫 Server-to-Server API（不回傳 HTML）
+      const tradeInfo = ecpay.payment_client.aio_check_out_credit_onetime(base_param);
+
+      console.log("✅ 綠界交易建立成功：", orderId);
+      return res.json({ ok: true, orderId, tradeInfo });
     }
 
-    // === 若為貨到付款 → 傳送通知 & 回傳成功 ===
+    // === 貨到付款 ===
     await sendOrderNotification({
       orderId,
       name: order.buyerName,
@@ -146,6 +144,7 @@ router.post("/payment/callback", async (req, res) => {
       spreadsheetId,
       range: "Orders!A:AZ",
     });
+
     const rows = ordersRes.data.values || [];
     const header = rows[0];
     const idx = rows.findIndex((r) => r[1] === MerchantTradeNo);
