@@ -107,19 +107,25 @@ router.post("/submit", async (req, res) => {
       const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
 
       // ✅ 抽取 action URL + 欄位
-      const actionMatch = htmlForm.match(/action="([^"]+)"/);
+      const actionMatch = htmlForm.match(/action="([^"]+)"/i);
+      const actionUrl =
+        actionMatch?.[1] ||
+        "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5";
+
+      if (!actionMatch) {
+        console.warn("⚠️ 未從綠界表單解析到 action，使用預設 Stage URL");
+      }
+
       const inputs = [...htmlForm.matchAll(/name="([^"]+)" value="([^"]*)"/g)]
         .map((m) => [m[1], m[2]]);
       const payload = Object.fromEntries(inputs);
 
-      console.log("✅ 綠界表單已產生：", orderId);
+      console.log("✅ 綠界表單已產生：", orderId, "➡️ action:", actionUrl);
+
       return res.json({
         ok: true,
         orderId,
-        ecpay: {
-          action: actionMatch?.[1] || "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5",
-          payload,
-        },
+        ecpay: { action: actionUrl, payload },
       });
     }
 
