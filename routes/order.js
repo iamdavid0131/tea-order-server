@@ -81,51 +81,39 @@ router.post("/submit", async (req, res) => {
       requestBody: { values: [newRow] },
     });
 
-  // === 若為線上支付（非貨到付款） ===
-if (order.paymentMethod && order.paymentMethod !== "cod") {
-  const ecpay = new ecpay_payment({
-    operationMode: "Test", // ⚠️ 上線改 "Production"
-    MercProfile: {
-      MerchantID: process.env.ECPAY_MERCHANT_ID,
-      HashKey: process.env.ECPAY_HASH_KEY,
-      HashIV: process.env.ECPAY_HASH_IV,
-    },
-    IgnorePayment: [],
-    isProjectContractor: false,
-  });
+    // === 若為線上支付（非貨到付款） ===
+    if (order.paymentMethod && order.paymentMethod !== "cod") {
+      const ecpay = new ecpay_payment({
+        operationMode: "Test", // ⚠️ 上線改 "Production"
+        MercProfile: {
+          MerchantID: process.env.ECPAY_MERCHANT_ID,
+          HashKey: process.env.ECPAY_HASH_KEY,
+          HashIV: process.env.ECPAY_HASH_IV,
+        },
+        IgnorePayment: [],
+        isProjectContractor: false,
+      });
 
-  const base_param = {
-    MerchantTradeNo: orderId,
-    MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
-    TotalAmount: order.total,
-    TradeDesc: "祥興茶行訂單",
-    ItemName: order.items.map((i) => i.name || "").join("#") || "茶葉商品",
-    ReturnURL: process.env.ECPAY_RETURN_URL,
-    ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
-    ChoosePayment: "ALL",
-  };
+      const base_param = {
+        MerchantTradeNo: orderId,
+        MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
+        TotalAmount: order.total,
+        TradeDesc: "祥興茶行訂單",
+        ItemName: order.items.map((i) => i.name || "").join("#") || "茶葉商品",
+        ReturnURL: process.env.ECPAY_RETURN_URL,
+        ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
+        ChoosePayment: "ALL",
+      };
 
-  // ⚙️ SDK 產生出的會是「urlencoded string」
-  const formData = ecpay.payment_client.aio_check_out_all(base_param);
+      const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
 
-  // ✅ 解開 URL 編碼成 payload object
-  const payload = querystring.parse(formData);
-
-  const actionUrl = "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5";
-
-  console.log("✅ 綠界表單已產生：", orderId);
-  console.log("🔍 回傳給前端的 JSON：", {
-    ok: true,
-    orderId,
-    ecpay: { action: actionUrl, payload },
-  });
-
-  return res.json({
-    ok: true,
-    orderId,
-    ecpay: { action: actionUrl, payload },
-  });
-}
+      console.log("✅ 綠界表單已產生：", orderId);
+      return res.json({
+        ok: true,
+        orderId,
+        paymentForm: htmlForm, // ✅ 直接傳給前端整段 HTML
+      });
+    }
 
      
 
