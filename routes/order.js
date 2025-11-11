@@ -104,7 +104,7 @@ router.post("/submit", async (req, res) => {
       ChoosePayment: "ALL",
     };
 
-         const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
+      const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
 
       // ✅ 抽取 action URL + 欄位
       const actionMatch = htmlForm.match(/action="([^"]+)"/);
