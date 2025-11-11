@@ -1,64 +1,124 @@
-import express from 'express';
-import { getSheetsClient } from '../lib/sheets.js';
-import { normalizePhoneTW, computeTierBySum } from '../lib/utils.js';
-import { awardTierGiftOnUpgrade } from '../lib/lineGift.js';
-import { sendOrderNotification } from '../lib/notify.js';
+import express from "express";
+import { getSheetsClient } from "../lib/sheets.js";
+import { normalizePhoneTW, computeTierBySum } from "../lib/utils.js";
+import { awardTierGiftOnUpgrade } from "../lib/lineGift.js";
+import { sendOrderNotification } from "../lib/notify.js";
 
 const router = express.Router();
 
 /**
- * 每筆訂單建立後，從 Orders 表更新 Members 的累積資料
+ * 🧾 前端送出訂單：寫入 Google Sheets 的 Orders 表
  */
-router.post('/sync', async (req, res) => {
+router.post("/submit", async (req, res) => {
   try {
     const sheets = await getSheetsClient();
     const spreadsheetId = process.env.SHEET_ID;
 
-    // 讀取最新一筆未同步的訂單
+    const {
+      items = [],
+      payment,
+      shipping,
+      store,
+      receiver = {},
+      total,
+      note = "",
+    } = req.body;
+
+    const now = new Date();
+    const orderId = "O" + now.getTime();
+
+    // === 商品清單文字化 ===
+    const itemsText = items
+      .map((i) => `${i.name || ""} ×${i.qty}`)
+      .join("、");
+
+    // === 寫入 Orders 表 ===
+    const newRow = [
+      orderId, // A: OrderID
+      receiver.name || "", // B: BuyerName
+      receiver.phone || "", // C: BuyerPhone
+      shipping || "", // D: ShippingMethod
+      store || "", // E: StoreName
+      receiver.address || "", // F: CODAddress
+      payment || "", // G: PaymentMethod
+      total || 0, // H: Total
+      note || "", // I: Note
+      itemsText, // J: Items
+      now.toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }), // K: CreatedAt
+    ];
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: "Orders!A:K",
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [newRow] },
+    });
+
+    console.log("🧾 新訂單已寫入 Google Sheets：", orderId);
+
+    // 可選：自動觸發會員同步
+    // await axios.post(`${process.env.API_BASE}/order/sync`);
+
+    res.json({ ok: true, orderId, msg: "訂單建立成功" });
+  } catch (err) {
+    console.error("[orders/submit] error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * 🪄 每筆訂單建立後，同步更新 Members 累積資料與升等贈禮
+ */
+router.post("/sync", async (req, res) => {
+  try {
+    const sheets = await getSheetsClient();
+    const spreadsheetId = process.env.SHEET_ID;
+
+    // === 取得最新一筆訂單 ===
     const ordersRes = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Orders!A2:AZ', // 足夠覆蓋所有欄位
+      range: "Orders!A2:AZ",
     });
     const orders = ordersRes.data.values || [];
-    if (!orders.length) return res.json({ ok: true, msg: '無訂單資料' });
+    if (!orders.length) return res.json({ ok: true, msg: "無訂單資料" });
 
-    // 假設每次同步「最新一筆訂單」
     const lastOrder = orders[orders.length - 1];
     const headerRes = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Orders!1:1',
+      range: "Orders!1:1",
     });
     const headers = headerRes.data.values[0];
+    const get = (key) => lastOrder[headers.indexOf(key)] || "";
 
-    const get = key => lastOrder[headers.indexOf(key)] || '';
-
-    const orderId = get('OrderID');
-    const name = get('BuyerName');
-    const phone = normalizePhoneTW(get('BuyerPhone'));
-    const method = get('ShippingMethod');
-    const storeCarrier = get('StoreCarrier');
-    const storeName = get('StoreName');
-    const address = get('CODAddress');
-    const total = Number(get('Total') || 0);
+    const orderId = get("OrderID");
+    const name = get("BuyerName");
+    const phone = normalizePhoneTW(get("BuyerPhone"));
+    const method = get("ShippingMethod");
+    const storeCarrier = get("StoreCarrier") || "";
+    const storeName = get("StoreName") || "";
+    const address = get("CODAddress") || "";
+    const total = Number(get("Total") || 0);
 
     if (!phone || !total) {
-      return res.status(400).json({ ok: false, error: '缺少 BuyerPhone 或 Total 欄位' });
+      return res
+        .status(400)
+        .json({ ok: false, error: "缺少 BuyerPhone 或 Total 欄位" });
     }
 
-    // === 讀取 Members 表 ===
+    // === 取得 Members ===
     const memRes = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Members!A2:N',
+      range: "Members!A2:N",
     });
     const members = memRes.data.values || [];
 
     const nowIso = new Date().toISOString();
     const phoneNorm = normalizePhoneTW(phone);
 
-    // === 找會員 ===
+    // === 搜尋會員 ===
     let foundIdx = -1;
     for (let i = 0; i < members.length; i++) {
-      const p = normalizePhoneTW(members[i][1] || '');
+      const p = normalizePhoneTW(members[i][1] || "");
       if (p === phoneNorm) {
         foundIdx = i;
         break;
@@ -82,28 +142,35 @@ router.post('/sync', async (req, res) => {
       m[7] = storeCarrier;
       m[8] = storeName;
       m[9] = address;
-      m[11] = nowIso; // updated_at
+      m[11] = nowIso;
 
       const range = `Members!A${foundIdx + 2}:N${foundIdx + 2}`;
       await sheets.spreadsheets.values.update({
         spreadsheetId,
         range,
-        valueInputOption: 'USER_ENTERED',
+        valueInputOption: "USER_ENTERED",
         requestBody: { values: [m] },
       });
 
       // 升等贈禮
       const userId = m[12];
       const memberName = m[2];
-      await awardTierGiftOnUpgrade(prevTier, newTier, phone, memberName, userId, orderId);
+      await awardTierGiftOnUpgrade(
+        prevTier,
+        newTier,
+        phone,
+        memberName,
+        userId,
+        orderId
+      );
     } else {
       // === 新會員 ===
-      const memberId = 'M' + Date.now();
+      const memberId = "M" + Date.now();
       const tier = computeTierBySum(total);
       const newRow = [
         memberId,
         phoneNorm,
-        '',
+        "",
         tier,
         total,
         1,
@@ -113,24 +180,24 @@ router.post('/sync', async (req, res) => {
         address,
         nowIso,
         nowIso,
-        '',
-        '',
+        "",
+        "",
       ];
       await sheets.spreadsheets.values.append({
         spreadsheetId,
-        range: 'Members!A:N',
-        valueInputOption: 'USER_ENTERED',
+        range: "Members!A:N",
+        valueInputOption: "USER_ENTERED",
         requestBody: { values: [newRow] },
       });
     }
 
-    // === 新增：發送通知 ===
+    // === 通知發送 ===
     await sendOrderNotification({
       orderId,
       name,
       phone,
       total,
-      items: [], // 可從表中擷取實際品項
+      items: [],
       method,
       address,
       storeName,
@@ -139,7 +206,7 @@ router.post('/sync', async (req, res) => {
 
     res.json({ ok: true, orderId, total });
   } catch (err) {
-    console.error('[orders/sync] error:', err);
+    console.error("[orders/sync] error:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
