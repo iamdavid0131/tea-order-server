@@ -101,7 +101,7 @@ router.post("/submit", async (req, res) => {
         TradeDesc: "Hsianghsing Tea Order",           // ✅ 純英文，無 encode
         ItemName: (order.items.map(i => i.name).join("#")) || "Tea Product",
         ReturnURL: process.env.ECPAY_RETURN_URL,
-        ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
+        ClientBackURL: `${frontendUrl}?paid=1&orderId=${orderId}&total=${order.total}`,
         ChoosePayment: "ALL",
       };
 
