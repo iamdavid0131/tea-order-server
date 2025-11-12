@@ -97,13 +97,14 @@ router.post("/submit", async (req, res) => {
       const base_param = {
         MerchantTradeNo: orderId,
         MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
-        TotalAmount: order.total,
-        TradeDesc: "祥興茶行訂單",
-        ItemName: order.items.map((i) => i.name || "").join("#") || "茶葉商品",
+        TotalAmount: Math.round(Number(order.total)), // ✅ 確保為整數
+        TradeDesc: encodeURIComponent("XiangXing Tea Order"), // ✅ 必須 URL 安全字元
+        ItemName: order.items.map(i => i.name || "").join("#") || "TeaProduct",
         ReturnURL: process.env.ECPAY_RETURN_URL,
         ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
         ChoosePayment: "ALL",
       };
+
       console.log("🧾 ECPay base_param", base_param);
       const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
 
