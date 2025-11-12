@@ -4,6 +4,8 @@ import { getSheetsClient } from "../lib/sheets.js";
 import { normalizePhoneTW } from "../lib/utils.js";
 import { sendOrderNotification } from "../lib/notify.js";
 import querystring from "querystring";
+import { recordOrderForMember } from "../lib/member.js";
+
 
 const router = express.Router();
 
@@ -116,6 +118,17 @@ router.post("/submit", async (req, res) => {
       );
 
       console.log("✅ 綠界表單已產生：", orderId);
+      try {
+        await recordOrderForMember(order.buyerPhone, order.total, {
+          method: order.shippingMethod,
+          carrier: order.storeCarrier,
+          storeName: order.storeName,
+          address: order.codAddress,
+          orderId,
+        });
+      } catch (err) {
+        console.warn("⚠️ 更新會員紀錄失敗:", err.message);
+      }
       return res.json({
         ok: true,
         orderId,
@@ -137,6 +150,20 @@ router.post("/submit", async (req, res) => {
       storeName: order.storeName,
       storeCarrier: order.storeCarrier,
     });
+
+    // ✅ 同步更新會員累積與最近收件地
+    try {
+      await recordOrderForMember(order.buyerPhone, order.total, {
+        method: order.shippingMethod,
+        carrier: order.storeCarrier,
+        storeName: order.storeName,
+        address: order.codAddress,
+        orderId,
+      });
+    } catch (err) {
+      console.warn("⚠️ 無法更新會員紀錄:", err.message);
+    }
+
 
     res.json({ ok: true, orderId });
   } catch (err) {

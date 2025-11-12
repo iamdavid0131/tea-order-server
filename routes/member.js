@@ -30,6 +30,15 @@ router.get('/', async (req, res) => {
       });
     }
 
+    let recentStores = [];
+    let recentAddresses = [];
+    try {
+      recentStores = JSON.parse(member.recent_stores || '[]').slice(0, 3);
+      recentAddresses = JSON.parse(member.recent_addresses || '[]').slice(0, 3);
+    } catch (e) {
+      console.warn('[member] recent JSON parse error:', e);
+    }
+
     res.json({
       ok: true,
       exists: true,
@@ -43,6 +52,8 @@ router.get('/', async (req, res) => {
         storeName: member.default_store_name || '',
         shipping: member.default_shipping_method || '',
         member_id: member.member_id || '',
+        recentStores,
+        recentAddresses,
       }
     });
 
