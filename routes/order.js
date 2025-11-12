@@ -95,11 +95,11 @@ router.post("/submit", async (req, res) => {
       });
 
       const base_param = {
-        MerchantTradeNo: orderId,
+        MerchantTradeNo: String(orderId),
         MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
-        TotalAmount: Math.round(Number(order.total)), // ✅ 確保為整數
-        TradeDesc: "Hsianghsing Tea Order", // ✅ 必須 URL 安全字元
-        ItemName: order.items.map(i => i.name || "").join("#") || "TeaProduct",
+        TotalAmount: String(Math.round(order.total)), // ✅ 確保是字串
+        TradeDesc: "Hsianghsing Tea Order",           // ✅ 純英文，無 encode
+        ItemName: (order.items.map(i => i.name).join("#")) || "Tea Product",
         ReturnURL: process.env.ECPAY_RETURN_URL,
         ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
         ChoosePayment: "ALL",
