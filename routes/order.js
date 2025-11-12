@@ -150,7 +150,7 @@ router.post("/submit", async (req, res) => {
  */
 router.post("/payment/callback", async (req, res) => {
   try {
-    const { MerchantTradeNo, RtnCode, TradeNo, PaymentDate } = req.body;
+    const { MerchantTradeNo, RtnCode, TradeNo, PaymentDate, PaymentTypeChargeFee } = req.body;
     const sheets = await getSheetsClient();
     const spreadsheetId = process.env.SHEET_ID;
 
@@ -170,6 +170,8 @@ router.post("/payment/callback", async (req, res) => {
       row[header.indexOf("PaymentStatus")] = status;
       row[header.indexOf("PaymentTxId")] = TradeNo;
       row[header.indexOf("PaymentTime")] = PaymentDate;
+      row[header.indexOf("PaymentTypeChargeFee")] = PaymentTypeChargeFee || "";
+
 
       const range = `Orders!A${idx + 1}:AZ${idx + 1}`;
       await sheets.spreadsheets.values.update({

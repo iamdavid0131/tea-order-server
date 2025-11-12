@@ -20,6 +20,7 @@ const app = express();
 
 // === Middleware ===
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
 // === Routes ===
