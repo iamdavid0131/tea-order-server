@@ -32,22 +32,18 @@ router.get('/', async (req, res) => {
       });
     }
 
-    let recentStores = [];
-    let recentAddresses = [];
-    try {
-      recentStores = member.recent_stores
-        ? JSON.parse(member.recent_stores)
-        : [];
-    } catch {
-      recentStores = [];
+  function safeParseJSON(data) {
+    if (Array.isArray(data)) return data;
+    if (typeof data === "string" && data.trim()) {
+      try { return JSON.parse(data); } catch { return []; }
     }
-    try {
-      recentAddresses = member.recent_addresses
-        ? JSON.parse(member.recent_addresses)
-        : [];
-    } catch {
-      recentAddresses = [];
-    }
+    return [];
+  }
+
+  const recentStores = safeParseJSON(member.recent_stores);
+  const recentAddresses = safeParseJSON(member.recent_addresses);
+
+
 
 
     res.json({
