@@ -104,7 +104,7 @@ router.post("/submit", async (req, res) => {
         ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
         ChoosePayment: "ALL",
       };
-
+      console.log("🧾 ECPay base_param", base_param);
       const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
 
       // ✅ 手動補上正確的 action URL
