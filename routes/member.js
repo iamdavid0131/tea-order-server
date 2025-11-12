@@ -3,6 +3,8 @@ import express from 'express';
 import { findMemberByPhone, recordOrderForMember } from '../lib/member.js';
 
 const router = express.Router();
+const frontendUrl = process.env.FRONTEND_URL || "https://tea-shop-frontend.onrender.com";
+
 
 /**
  * 🔍 查詢會員資料 by phone
@@ -33,11 +35,20 @@ router.get('/', async (req, res) => {
     let recentStores = [];
     let recentAddresses = [];
     try {
-      recentStores = JSON.parse(member.recent_stores || '[]').slice(0, 3);
-      recentAddresses = JSON.parse(member.recent_addresses || '[]').slice(0, 3);
-    } catch (e) {
-      console.warn('[member] recent JSON parse error:', e);
+      recentStores = member.recent_stores
+        ? JSON.parse(member.recent_stores)
+        : [];
+    } catch {
+      recentStores = [];
     }
+    try {
+      recentAddresses = member.recent_addresses
+        ? JSON.parse(member.recent_addresses)
+        : [];
+    } catch {
+      recentAddresses = [];
+    }
+
 
     res.json({
       ok: true,
