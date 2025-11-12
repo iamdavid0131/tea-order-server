@@ -98,7 +98,7 @@ router.post("/submit", async (req, res) => {
         MerchantTradeNo: orderId,
         MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
         TotalAmount: Math.round(Number(order.total)), // ✅ 確保為整數
-        TradeDesc: encodeURIComponent("XiangXing Tea Order"), // ✅ 必須 URL 安全字元
+        TradeDesc: "Hsianghsing Tea Order", // ✅ 必須 URL 安全字元
         ItemName: order.items.map(i => i.name || "").join("#") || "TeaProduct",
         ReturnURL: process.env.ECPAY_RETURN_URL,
         ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
