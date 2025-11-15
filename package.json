@@ -34,7 +34,8 @@
     "googleapis": "^110.0.0",
     "hono": "^4.10.3",
     "node-fetch": "^3.3.2",
-    "nodemailer": "^7.0.10"
+    "nodemailer": "^7.0.10",
+    "openai": "^6.9.0"
   },
   "devDependencies": {
     "eslint": "^8.57.1",
