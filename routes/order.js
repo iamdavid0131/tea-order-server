@@ -5,7 +5,7 @@ import { normalizePhoneTW } from "../lib/utils.js";
 import { sendOrderNotification } from "../lib/notify.js";
 import querystring from "querystring";
 import { recordOrderForMember } from "../lib/member.js";
-
+import { sanitizeItemName } from "../lib/utils.js";
 
 const router = express.Router();
 
@@ -101,7 +101,9 @@ router.post("/submit", async (req, res) => {
         MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
         TotalAmount: String(Math.round(order.total)), // ✅ 確保是字串
         TradeDesc: "Hsianghsing Tea Order",           // ✅ 純英文，無 encode
-        ItemName: (order.items.map(i => i.name).join("#")) || "Tea Product",
+        ItemName: order.items
+          .map(i => sanitizeItemName(i.name))
+          .join("#") || "Tea_Product",
         ReturnURL: process.env.ECPAY_RETURN_URL,
         ClientBackURL: `${frontendUrl}?paid=1&orderId=${orderId}&total=${order.total}`,
         ChoosePayment: "ALL",

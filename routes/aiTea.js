@@ -14,26 +14,27 @@ router.post("/", async (req, res) => {
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_KEY,
     });
-
+    const previous = req.body.previousTaste;
     const prompt = `
-你是「祥興茶行」的專業導購助理。
+    你是祥興茶行 AI 導購。
+    如果有 past preference，請優先考慮：
 
-以下是茶品資料（含風味數值與泡法）：
-${JSON.stringify(products, null, 2)}
+    使用者口味偏好（可能存在或不存在）：
+    ${previous ? JSON.stringify(previous, null, 2) : "無資料"}
 
-客人需求：
-${message}
+    目前使用者需求：
+    ${message}
 
-請務必輸出 JSON：
-{
-  "best": "茶品ID",
-  "reason": "中文理由…",
-  "second": {
-    "id": "ID",
-    "reason": "簡短理由"
-  }
-}
-`;
+    請務必輸出 JSON：
+    {
+    "best": "茶品ID",
+    "reason": "中文理由…",
+    "second": {
+        "id": "ID",
+        "reason": "簡短理由"
+    }
+    }
+    `;
 
     const completion = await openai.responses.create({
       model: "gpt-4.1-mini",
