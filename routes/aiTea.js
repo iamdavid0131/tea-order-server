@@ -144,6 +144,71 @@ function safeJSON(text) {
 }
 
 // ------------------------------------------------------------
+// 提取茶品
+// ------------------------------------------------------------
+function extractProductsFromMessage(message, products) {
+  const aliasDict = buildAliasDict(products);
+  const cleaned = message.toLowerCase();
+
+  const found = [];
+
+  for (const p of products) {
+    for (const alias of aliasDict[p.id]) {
+      const a = alias.toLowerCase();
+      if (!a) continue;
+
+      if (cleaned.includes(a)) {
+        found.push(p);
+        break;
+      }
+    }
+  }
+
+  return found;
+}
+
+// ------------------------------------------------------------
+// 比較茶品
+// ------------------------------------------------------------
+async function runCompareAI(a, b, message, previousTaste, client) {
+  const prompt = `
+你是祥興茶行的專業茶品比較 AI。
+使用者想比較：
+1. ${a.title}
+2. ${b.title}
+
+請根據香氣、厚度、焙火、價格、風味差異清楚比較兩款茶。
+
+輸出格式（純 JSON）：
+{
+  "mode": "compare",
+  "a": "${a.id}",
+  "b": "${b.id}",
+  "compare": {
+    "aroma": "...",
+    "body": "...",
+    "roast": "...",
+    "price": "...",
+    "summary": "..."
+  }
+}
+`;
+
+  const out = await client.responses.create({
+    model: "gpt-4.1-mini",
+    input: prompt,
+  });
+
+  const json = safeJSON(out.output_text || "");
+  return json || {
+    mode: "error",
+    message: "AI 格式錯誤"
+  };
+}
+
+
+
+// ------------------------------------------------------------
 // ⭐ 主路由（修正版完整流程）
 // ------------------------------------------------------------
 router.post("/", async (req, res) => {
@@ -157,6 +222,18 @@ router.post("/", async (req, res) => {
     // ❶ Intent：一定要先做
     const intent = await classifyIntent(client, message);
     console.log("🔍 Intent =", intent);
+
+    const foundProducts = extractProductsFromMessage(message, products);
+
+    // compare 模式：如果 user 說明兩款 → 直接用
+    if (intent === "compare" && foundProducts.length >= 2) {
+      const a = foundProducts[0];
+      const b = foundProducts[1];
+
+      console.log("🔍 使用者指定比較：", a.title, b.title);
+
+      return runCompareAI(a, b, message, previousTaste, client);
+    }
 
     // ❷ fuzzy：只有 recommend / compare 需要擋
     const { best, score } = fuzzyMatchProduct(message, products);
