@@ -15,9 +15,13 @@ const router = express.Router();
  */
 router.post("/submit", async (req, res) => {
   try {
+    // 如果使用 form POST，要這樣解析
+    const order = req.body.orderJSON
+      ? JSON.parse(req.body.orderJSON)
+      : req.body;
+
     const sheets = await getSheetsClient();
     const spreadsheetId = process.env.SHEET_ID;
-    const order = req.body;
 
     const now = new Date();
     const timestamp = now.toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
@@ -44,9 +48,9 @@ router.post("/submit", async (req, res) => {
       Note: order.note || "",
       Consent: order.consent || "",
       PaymentMethod: order.paymentMethod || "",
-      PaymentStatus: order.paymentStatus || "pending",
-      PaymentTxId: order.paymentTxId || "",
-      PaymentTime: order.paymentTime || "",
+      PaymentStatus: "pending",
+      PaymentTxId: "",
+      PaymentTime: "",
     };
 
     // === 初始化商品欄位 ===
@@ -59,10 +63,12 @@ router.post("/submit", async (req, res) => {
       const name = item.name?.trim() || "";
       const qty = Number(item.qty) || 0;
       const pack = item.pack ? 1 : 0;
-      const qtyKey = `${name}_數量`;
-      const packKey = `${name}_裝罐`;
-      if (headers.includes(qtyKey)) rowMap[qtyKey] = qty;
-      if (headers.includes(packKey)) rowMap[packKey] = pack;
+
+      if (headers.includes(`${name}_數量`))
+        rowMap[`${name}_數量`] = qty;
+
+      if (headers.includes(`${name}_裝罐`))
+        rowMap[`${name}_裝罐`] = pack;
     }
 
     // === 金額 ===
@@ -83,10 +89,13 @@ router.post("/submit", async (req, res) => {
       requestBody: { values: [newRow] },
     });
 
-    // === 若為線上支付（非貨到付款） ===
-    if (order.paymentMethod && order.paymentMethod !== "cod") {
+
+    // =====================================================
+    // 🔥🔥 線上支付：由後端直接送 HTML 表單 → 瀏覽器 auto-submit
+    // =====================================================
+    if (order.paymentMethod !== "cod") {
       const ecpay = new ecpay_payment({
-        operationMode: "Test", // ⚠️ 上線改 "Production"
+        operationMode: "Test",
         MercProfile: {
           MerchantID: process.env.ECPAY_MERCHANT_ID,
           HashKey: process.env.ECPAY_HASH_KEY,
@@ -96,52 +105,37 @@ router.post("/submit", async (req, res) => {
         isProjectContractor: false,
       });
 
-      const frontendUrl = process.env.ECPAY_CLIENT_BACK_URL;
       const base_param = {
         MerchantTradeNo: String(orderId),
         MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
-        TotalAmount: String(Math.round(order.total)), // ✅ 確保是字串
-        TradeDesc: "Hsianghsing Tea Order",           // ✅ 純英文，無 encode
-        ItemName: order.items
-          .map(i => sanitizeItemName(i.name))
-          .join("#") || "Tea_Product",
+        TotalAmount: String(order.total),
+        TradeDesc: "Hsianghsing Tea Order",
+        ItemName:
+          order.items.map((i) => sanitizeItemName(i.name)).join("#") ||
+          "Tea_Product",
+
         ReturnURL: process.env.ECPAY_RETURN_URL,
-        ClientBackURL: `${frontendUrl}?paid=1&orderId=${orderId}&total=${order.total}`,
+        ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
         ChoosePayment: "ALL",
       };
 
-      console.log("🧾 ECPay base_param", base_param);
       const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
 
-      // ✅ 手動補上正確的 action URL
-      const ecpayAction = "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5";
       const fixedHtml = htmlForm.replace(
         /action="[^"]*"/,
-        `action="${ecpayAction}"`
+        `action="https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5"`
       );
 
-      console.log("✅ 綠界表單已產生：", orderId);
-      try {
-        await recordOrderForMember(order.buyerPhone, order.total, {
-          method: order.shippingMethod,
-          carrier: order.storeCarrier,
-          storeName: order.storeName,
-          address: order.codAddress,
-          orderId,
-        });
-      } catch (err) {
-        console.warn("⚠️ 更新會員紀錄失敗:", err.message);
-      }
-      return res.json({
-        ok: true,
-        orderId,
-        paymentForm: fixedHtml, // ✅ 直接傳給前端整段 HTML
-      });
+      console.log("⚡ 直接跳綠界付款頁面");
+
+      // 🔥🔥 讓瀏覽器直接打開綠界（不用前端 fetch）
+      return res.send(fixedHtml);
     }
 
-     
 
-    // === 貨到付款 ===
+    // =====================================================
+    // 🟢 貨到付款
+    // =====================================================
     await sendOrderNotification({
       orderId,
       name: order.buyerName,
@@ -154,26 +148,13 @@ router.post("/submit", async (req, res) => {
       storeCarrier: order.storeCarrier,
     });
 
-    // ✅ 同步更新會員累積與最近收件地
-    try {
-      await recordOrderForMember(order.buyerPhone, order.total, {
-        method: order.shippingMethod,
-        carrier: order.storeCarrier,
-        storeName: order.storeName,
-        address: order.codAddress,
-        orderId,
-      });
-    } catch (err) {
-      console.warn("⚠️ 無法更新會員紀錄:", err.message);
-    }
-
-
-    res.json({ ok: true, orderId });
+    return res.send(`訂單已建立：${orderId}（貨到付款）`);
   } catch (err) {
     console.error("[order/submit] error:", err);
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).send("錯誤：" + err.message);
   }
 });
+
 
 /**
  * 💰 綠界回傳付款結果
