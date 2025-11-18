@@ -18,25 +18,17 @@ function buildAliasDict(products) {
 
     dict[id] = new Set();
 
-    // ① 原名
     dict[id].add(title);
-
-    // ② 去掉常見茶字
     dict[id].add(title.replace(/[茶烏龍高山金萱翠玉四季春]/g, ""));
-
-    // ③ 俗稱：前兩字
     dict[id].add(title.slice(0, 2));
 
-    // ④ 拼音
     const pinyin = toPinyin(title);
     dict[id].add(pinyin);
     dict[id].add(pinyin.replace(/\s+/g, ""));
 
-    // ⑤ 注音
     const bopomo = toBopomo(title);
     dict[id].add(bopomo.replace(/\s+/g, ""));
 
-    // ⑥ 英文縮寫
     const abbr = title
       .split("")
       .filter((c) => c.charCodeAt(0) < 256)
@@ -45,7 +37,6 @@ function buildAliasDict(products) {
       .toUpperCase();
     if (abbr.length > 1) dict[id].add(abbr);
 
-    // ⑦ 錯字
     const typoMap = {
       "貴花": "桂花",
       "阿里珊": "阿里山",
@@ -73,7 +64,7 @@ function toBopomo(str) {
   const map = {
     "梨": "ㄌㄧ", "山": "ㄕㄢ",
     "桂": "ㄍㄨㄟ", "花": "ㄏㄨㄚ",
-    "東": "ㄉㄨㄥ", "方": "ㄈㄤ"
+    "東": "ㄉㄨㄥ", "方": "ㄈㄤ",
   };
   return str.split("").map((ch) => map[ch] || "").join(" ");
 }
@@ -112,7 +103,7 @@ function fuzzyMatchProduct(message, products) {
 }
 
 // ------------------------------------------------------------
-// AI 意圖分類器（最重要）
+// AI 意圖分類器
 // ------------------------------------------------------------
 async function classifyIntent(client, message) {
   const prompt = `
@@ -153,7 +144,7 @@ function safeJSON(text) {
 }
 
 // ------------------------------------------------------------
-// ⭐ 主路由（旗艦版 AI）
+// ⭐ 主路由（修正版完整流程）
 // ------------------------------------------------------------
 router.post("/", async (req, res) => {
   try {
@@ -163,43 +154,46 @@ router.post("/", async (req, res) => {
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_KEY });
 
-    // ❶ Intent
+    // ❶ Intent：一定要先做
     const intent = await classifyIntent(client, message);
     console.log("🔍 Intent =", intent);
 
-    // ❷ Fuzzy 搜尋（作為推薦、泡法、送禮等基礎）
+    // ❷ fuzzy：只有 recommend / compare 需要擋
     const { best, score } = fuzzyMatchProduct(message, products);
 
-    // 如果找不到 → 返回 not_found
-    if (!best || score < 2) {
+    const needFuzzy =
+      intent === "recommend" ||
+      intent === "compare";
+
+    if (needFuzzy && (!best || score < 2)) {
       return res.json({
         mode: "not_found",
-        message: "目前找不到符合描述的茶款，我可以推薦最接近的風味。",
-        suggest: null,
+        message: "目前找不到符合描述的茶款。",
       });
     }
 
+    // ⭐ brew / gift / masterpick / personality：找不到也 OK
+    const finalBest = best || products[0]; // fallback
+
     // ------------------------------------------------------------
-    // 🧠 AI 生成 JSON（根據 Intent）
+    // ❸ AI 生成 JSON
     // ------------------------------------------------------------
     const prompt = `
 你是祥興茶行 AI 導購。
 使用者訊息：${message}
 意圖：${intent}
 
-最匹配的茶品：${best.title}（ID：${best.id}）
+最匹配的茶品：${finalBest.title}（ID：${finalBest.id}）
 
 使用者口味偏好（可能為 null）：
 ${previousTaste ? JSON.stringify(previousTaste, null, 2) : "無"}
 
 【請回傳純 JSON，不要其他文字】
 
-不同 intent 請輸出不同格式：
-
 === recommend ===
 {
   "mode": "recommend",
-  "best": { "id": "${best.id}", "reason": "..." },
+  "best": { "id": "${finalBest.id}", "reason": "..." },
   "second": { "id": "次推薦 ID", "reason": "..." }
 }
 
@@ -220,7 +214,7 @@ ${previousTaste ? JSON.stringify(previousTaste, null, 2) : "無"}
 === brew ===
 {
   "mode": "brew",
-  "tea": "${best.id}",
+  "tea": "${finalBest.id}",
   "brew": {
     "hot": "...",
     "ice_bath": "...",
@@ -232,33 +226,23 @@ ${previousTaste ? JSON.stringify(previousTaste, null, 2) : "無"}
 === gift ===
 {
   "mode": "gift",
-  "best": "ID",
+  "best": "${finalBest.id}",
   "reason": "..."
 }
 
 === masterpick ===
 {
   "mode": "masterpick",
-  "best": "ID",
+  "best": "${finalBest.id}",
   "reason": "..."
 }
 
 === personality ===
-### Intent = personality：
-
-你是「祥興茶行 茶品性格測驗 AI」。
-
-你要根據使用者的描述（可能是情緒、最近狀態、心情、個性）  
-推薦一款最符合他性格或當下狀態的茶。
-
-請在輸出時加入：
-
 {
   "mode": "personality",
-  "tea": "茶品ID",
-  "summary": "茶與性格的對應描述，例如：你是一位溫柔但內斂的人……"
+  "tea": "${finalBest.id}",
+  "summary": "茶與性格的對應描述"
 }
-
 `;
 
     const completion = await client.responses.create({
