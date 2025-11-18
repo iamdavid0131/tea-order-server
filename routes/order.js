@@ -151,12 +151,14 @@ router.post("/submit", async (req, res) => {
       storeCarrier: order.storeCarrier,
     });
 
-    // 🔥🔥 回傳 JSON，讓前端顯示成功視窗
-    return res.json({
-      ok: true,
-      orderId,
-      cod: true
-    });
+    return res.redirect(
+  `${process.env.ECPAY_CLIENT_BACK_URL}?paid=1&orderId=${orderId}&total=${order.total}`
+);
+  } catch (err) {
+    console.error("[order/submit] error:", err);
+    res.status(500).send("錯誤：" + err.message);
+  }
+});
 
 
 /**
