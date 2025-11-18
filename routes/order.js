@@ -95,7 +95,8 @@ router.post("/submit", async (req, res) => {
         IgnorePayment: [],
         isProjectContractor: false,
       });
-
+      
+      const frontendUrl = process.env.FRONTEND_URL;
       const base_param = {
         MerchantTradeNo: String(orderId),
         MerchantTradeDate: now.toLocaleString("zh-TW", { hour12: false }),
