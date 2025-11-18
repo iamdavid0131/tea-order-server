@@ -118,6 +118,9 @@ router.post("/submit", async (req, res) => {
         ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
         ChoosePayment: "ALL",
       };
+      console.log("🌏 ClientBackURL =", process.env.ECPAY_CLIENT_BACK_URL);
+      console.log("🌏 ReturnURL =", process.env.ECPAY_RETURN_URL);
+      console.log("🧾 ECPay base_param =", base_param);
 
       const htmlForm = ecpay.payment_client.aio_check_out_all(base_param);
 
