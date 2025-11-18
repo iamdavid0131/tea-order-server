@@ -151,12 +151,12 @@ router.post("/submit", async (req, res) => {
       storeCarrier: order.storeCarrier,
     });
 
-    return res.send(`訂單已建立：${orderId}（貨到付款）`);
-  } catch (err) {
-    console.error("[order/submit] error:", err);
-    res.status(500).send("錯誤：" + err.message);
-  }
-});
+    // 🔥🔥 回傳 JSON，讓前端顯示成功視窗
+    return res.json({
+      ok: true,
+      orderId,
+      cod: true
+    });
 
 
 /**
