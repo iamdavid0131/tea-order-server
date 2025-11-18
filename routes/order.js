@@ -139,7 +139,7 @@ router.post("/submit", async (req, res) => {
     // =====================================================
     // 🟢 貨到付款
     // =====================================================
-    await sendOrderNotification({
+   await sendOrderNotification({
       orderId,
       name: order.buyerName,
       phone: order.buyerPhone,
@@ -151,9 +151,12 @@ router.post("/submit", async (req, res) => {
       storeCarrier: order.storeCarrier,
     });
 
-    return res.redirect(
-  `${process.env.ECPAY_CLIENT_BACK_URL}?paid=1&orderId=${orderId}&total=${order.total}`
-);
+    // 🔥🔥 回傳 JSON，讓前端顯示成功視窗
+    return res.json({
+      ok: true,
+      orderId,
+      cod: true
+    });
   } catch (err) {
     console.error("[order/submit] error:", err);
     res.status(500).send("錯誤：" + err.message);
