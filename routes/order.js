@@ -115,7 +115,7 @@ router.post("/submit", async (req, res) => {
           "Tea_Product",
 
         ReturnURL: process.env.ECPAY_RETURN_URL,
-        ClientBackURL: process.env.ECPAY_CLIENT_BACK_URL,
+        ClientBackURL: `${process.env.ECPAY_CLIENT_BACK_URL}?paid=1&orderId=${orderId}&total=${order.total}`,
         ChoosePayment: "ALL",
       };
       console.log("🌏 ClientBackURL =", process.env.ECPAY_CLIENT_BACK_URL);
