@@ -319,10 +319,11 @@ function runGiftRecommend(data, products) {
 async function runPairingFlow(session, message, products, client) {
   const answer = interpretAnswer(message);
 
-  // 如果使用者直接輸入的是料理（牛肉麵、麻油雞…）
+  // ★★★ 1. 若使用者輸入本身就是料理（麻油雞、牛肉麵、石鍋拌飯等）
   if (!session.step && detectDish(message)) {
-    session.step = "ask_style"; // 跳過料理步驟
-    session.data.dish = message; // 直接記錄
+    session.step = "ask_style"; // 直接跳到下一步（風味）
+    session.data.dish = message;
+
     return {
       mode: "ask",
       ask: `了解～${message} 想搭什麼風味的茶？`,
@@ -330,7 +331,7 @@ async function runPairingFlow(session, message, products, client) {
     };
   }
 
-  // Step 1：問「搭什麼料理」
+  // ★★★ 2. Step 1：沒有料理資訊 → 才問料理
   if (!session.step) {
     session.step = "ask_dish";
     return {
@@ -340,10 +341,11 @@ async function runPairingFlow(session, message, products, client) {
     };
   }
 
-  // 使用者回答料理
+  // ★★★ 3. Step 2：使用者回答料理
   if (session.step === "ask_dish") {
     session.data.dish = message;
     session.step = "ask_style";
+
     return {
       mode: "ask",
       ask: `了解～${message} 想搭什麼風味的茶？`,
@@ -351,7 +353,7 @@ async function runPairingFlow(session, message, products, client) {
     };
   }
 
-  // 使用者回答風味 → 直接推薦
+  // ★★★ 4. Step 3：使用者回答風味 → 直接推薦
   if (session.step === "ask_style") {
     session.data.style = answer.value;
     return runPairingRecommend(session.data, products);
