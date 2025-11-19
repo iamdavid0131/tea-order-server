@@ -319,7 +319,18 @@ function runGiftRecommend(data, products) {
 async function runPairingFlow(session, message, products, client) {
   const answer = interpretAnswer(message);
 
-  // Step 1：詢問料理種類
+  // 如果使用者直接輸入的是料理（牛肉麵、麻油雞…）
+  if (!session.step && detectDish(message)) {
+    session.step = "ask_style"; // 跳過料理步驟
+    session.data.dish = message; // 直接記錄
+    return {
+      mode: "ask",
+      ask: `了解～${message} 想搭什麼風味的茶？`,
+      options: ["清爽", "解膩", "香氣強", "果香", "不確定"]
+    };
+  }
+
+  // Step 1：問「搭什麼料理」
   if (!session.step) {
     session.step = "ask_dish";
     return {
@@ -329,27 +340,24 @@ async function runPairingFlow(session, message, products, client) {
     };
   }
 
+  // 使用者回答料理
   if (session.step === "ask_dish") {
     session.data.dish = message;
-
-    // Step 2：詢問偏好風味
     session.step = "ask_style";
     return {
       mode: "ask",
-      ask: "了解，那你偏好什麼風味？",
+      ask: `了解～${message} 想搭什麼風味的茶？`,
       options: ["清爽", "解膩", "香氣強", "果香", "不確定"]
     };
   }
 
+  // 使用者回答風味 → 直接推薦
   if (session.step === "ask_style") {
     session.data.style = answer.value;
-    // 🚀 防重複觸發 pairing
-    session.flow = null;
-    session.step = null;
-
     return runPairingRecommend(session.data, products);
   }
 }
+
 
 
 
@@ -404,8 +412,17 @@ function runPairingRecommend(data, products) {
 // 🔥 料理偵測器：使用者輸入包含「xxx雞」「xxx肉」「xxx飯」「麵」「鍋」… → 直接視為搭餐
 // -----------------------------------------
 function detectDish(message) {
-  return /雞|鴨|牛|豬|魚|蝦|蟹|飯|麵|鍋|料理|菜|湯|排|炸|烤|煎|壽司|甜點|蛋糕|餅乾|披薩|牛排|漢堡|火鍋/.test(message);
+  const m = message.replace(/\s+/g, "");
+
+  // ❌ 排除「搭餐 / 搭配 / 配茶 / 想配」
+  if (/搭餐|搭配|配茶|想搭|要搭/.test(m)) {
+    return false;
+  }
+
+  // ✔ 真正的料理關鍵字
+  return /(麻油雞|雞肉|雞腿|烤鴨|牛排|牛肉|豬排|豬肉|壽司|魚|蝦|蟹|炸雞|炸物|甜點|蛋糕|餅乾|披薩|火鍋|鍋|湯|煲|炒飯|炒麵)/.test(m);
 }
+
 
 // -----------------------------------------
 function extractProductsFromMessage(message, products) {
