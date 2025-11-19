@@ -158,34 +158,34 @@ async function classifyIntent(client, message) {
   const prompt = `
 你是祥興茶行 AI 導購意圖分類器。
 
-請根據使用者訊息判斷意圖。
+請只根據關鍵字做最保守判斷，不要猜測。
 
-可回傳：
-- recommend          （要推薦茶）
-- compare            （想比較兩款茶）
-- brew               （問泡法）
-- gift               （送禮）
-- pairing            （搭餐）
-- masterpick         （店長推薦）
-- personality        （性格測驗）
-- ask                （AI 要提問）
-- continue           （使用者正在回答上一題）
-- unknown
+分類規則（務必遵守）：
 
-判斷規則：
-1. 若訊息是「女生」「長輩」「500元」「清爽」→ 這是使用者回答問題 → 回傳 continue
-2. 若使用者想送禮但資訊不足 → 回傳 ask
-3. 若提到食物 → pairing
-4. 若提到送禮 → gift
-5. 若提到比較 → compare
-6. 若提到泡法 → brew
-7. 若提到“我很累/心情不好/今天放鬆” → personality
-8. 其他 → recommend
+1. 若訊息屬於預算/風味/對象（例如: 500、清爽、女生、長輩…）
+   → 回傳 "continue"
 
-使用者訊息：
-${message}
+2. 若有包含以下任一詞：
+   ["送禮", "禮物", "送茶"]
+   → 回傳 "gift"
 
-請直接回傳字串，不要多餘文字。
+3. 若有包含以下食物詞：
+   ["雞", "鴨", "牛排", "牛肉", "火鍋", "壽司", "麵", "飯", "炸", "甜點"]
+   → 回傳 "pairing"
+
+4. 若包含 ["比較", "差別", "哪個好"]
+   → 回傳 "compare"
+
+5. 若包含 ["泡法", "怎麼泡", "沖法"]
+   → 回傳 "brew"
+
+6. 若包含 ["推薦", "想喝"]
+   → 回傳 "recommend"
+
+7. 若無法分類 → 回傳 "recommend"
+
+請直接回傳分類字串，不要多餘文字。
+訊息：${message}
 `;
 
   const out = await client.responses.create({
@@ -193,9 +193,11 @@ ${message}
     input: prompt
   });
 
-  const intentRaw = out.output_text || "";
-  const intent = intentRaw.trim().replace(/[^a-z]/gi, ""); 
-  return intent || "unknown";
+  const result = out.output_text?.trim()?.toLowerCase();
+  return ["recommend", "compare", "brew", "gift", "pairing", "continue"]
+    .includes(result)
+    ? result
+    : "recommend";
 }
 
 // ============================================================
@@ -486,7 +488,8 @@ router.post("/", async (req, res) => {
     const client = new OpenAI({ apiKey: process.env.OPENAI_KEY });
 
     // 如果前端有傳 session → 使用，不然初始化
-    const session = clientSession && clientSession.step ? clientSession : initSession();
+    const session = clientSession ?? initSession();
+
 
     // -----------------------------------------
     // ❶ Intent 判斷（recommend/gift/pairing/...）
