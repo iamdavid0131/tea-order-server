@@ -168,7 +168,7 @@ async function classifyIntent(client, message) {
 `;
 
   const out = await client.responses.create({
-    model: "gpt-4.1-small",
+    model: "gpt-4.1-mini",
     input: prompt
   });
 
@@ -425,7 +425,7 @@ B: ${b.title}
 `;
 
   const out = await client.responses.create({
-    model: "gpt-4.1-small",
+    model: "gpt-4.1-mini",
     input: prompt
   });
 
