@@ -132,14 +132,23 @@ function fuzzyMatchProduct(message, products) {
 // ============================================================
 
 async function classifyIntent(client, message) {
+    const msg = message.trim();
+
+  // 🔥【規則 0】只有純預算（整句都是數字）才 continue
+  if (/^\$?\d+\s*$/.test(msg)) {
+    return "continue";
+  }
   const prompt = `
 你是祥興茶行 AI 導購意圖分類器。
 
 請只依照「字面關鍵字」判斷，不要推測、不猜用意。
 
 規則：
-1. 若訊息屬於預算/風味/對象（例如: 2000、清爽、女生、長輩…）
-   → 回傳 "continue"
+1. 若訊息「完全是回答」例如：
+   - 純預算（數字）
+   - 單一風味（清爽、花香、果香）
+   - 單一對象（女生、長輩）
+   這才是 continue
 
 2. 若包含：
    ["送禮", "禮物", "送茶"]
@@ -186,7 +195,9 @@ async function classifyIntent(client, message) {
 function interpretAnswer(message) {
   const msg = message.trim();
 
-  if (/^\$?\d+/.test(msg)) {
+  
+
+   if (/^\$?\d+\s*$/.test(msg)){
     return { type: "budget", value: msg };
   }
 
