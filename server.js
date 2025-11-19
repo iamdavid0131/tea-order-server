@@ -16,6 +16,8 @@ import memberRouter from './routes/member.js';
 import lineLoginRouter from './routes/line-login.js';
 import cleanupCouponsRouter from './routes/cleanupCoupons.js';
 import aiTeaRouter from "./routes/aiTea.js";
+import stockRouter from './routes/stock.js';
+
 const app = express();
 
 // === Middleware ===
@@ -34,6 +36,7 @@ app.use('/api/member', memberRouter);
 app.use('/api/line-login', lineLoginRouter);
 app.use('/api/cleanup-coupons', cleanupCouponsRouter);
 app.use("/api/ai-tea", aiTeaRouter);
+app.use('/api/stock', stockRouter); 
 
 
 // === Root route ===

@@ -6,6 +6,7 @@ import { sendOrderNotification } from "../lib/notify.js";
 import querystring from "querystring";
 import { recordOrderForMember } from "../lib/member.js";
 import { sanitizeItemName } from "../lib/utils.js";
+import fetch from "node-fetch";
 
 const router = express.Router();
 
@@ -88,6 +89,28 @@ router.post("/submit", async (req, res) => {
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [newRow] },
     });
+        // =====================================================
+    // 🧮 庫存扣除（統一在後端做，避免前端繞過）
+    // =====================================================
+    const stockItems = (order.items || []).map(it => ({
+      productId: it.productId || it.id,  // 你前端 item 有 id / productId 兩種可能
+      qty: Number(it.qty) || 0
+    }));
+
+    const stockRes = await fetch(`${process.env.SERVER_URL}/api/stock/deduct`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: stockItems })
+    }).then(r => r.json());
+
+    if (!stockRes.ok) {
+      console.error("❌ 庫存不足：", stockRes);
+      return res.status(400).json({
+        ok: false,
+        error: stockRes.message || "庫存不足，無法建立訂單"
+      });
+    }
+
 
 
     // =====================================================
