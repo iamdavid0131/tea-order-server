@@ -484,7 +484,7 @@ router.post("/", async (req, res) => {
     const client = new OpenAI({ apiKey: process.env.OPENAI_KEY });
 
     // 如果前端有傳 session → 使用，不然初始化
-    const session = clientSession || initSession();
+    const session = clientSession && clientSession.step ? clientSession : initSession();
 
     // -----------------------------------------
     // ❶ Intent 判斷（recommend/gift/pairing/...）
