@@ -18,17 +18,45 @@ function buildAliasDict(products) {
 
     dict[id] = new Set();
 
+    // ① 原名
     dict[id].add(title);
-    dict[id].add(title.replace(/[茶烏龍高山金萱翠玉四季春]/g, ""));
+
+    // ② 去除常見茶字
+    const cleaned = title.replace(/[茶烏龍高山金萱翠玉四季春頂級福壽]/g, "");
+    dict[id].add(cleaned);
+
+    // ③ 前兩字（常用）
     dict[id].add(title.slice(0, 2));
 
+    // ④ 2 字子片段：只收有意義的
+    for (let i = 0; i < title.length - 1; i++) {
+      const slice2 = title.slice(i, i + 2);
+
+      // 過濾無意義詞
+      if (slice2.length === 2 && /[一-龥]{2}/.test(slice2)) {
+        dict[id].add(slice2);
+      }
+    }
+
+    // ⑤ 3 字子片段：同樣過濾
+    for (let i = 0; i < title.length - 2; i++) {
+      const slice3 = title.slice(i, i + 3);
+
+      if (slice3.length === 3 && /[一-龥]{3}/.test(slice3)) {
+        dict[id].add(slice3);
+      }
+    }
+
+    // ⑥ 拼音
     const pinyin = toPinyin(title);
     dict[id].add(pinyin);
     dict[id].add(pinyin.replace(/\s+/g, ""));
 
+    // ⑦ 注音
     const bopomo = toBopomo(title);
     dict[id].add(bopomo.replace(/\s+/g, ""));
 
+    // ⑧ 英文縮寫
     const abbr = title
       .split("")
       .filter((c) => c.charCodeAt(0) < 256)
@@ -37,6 +65,7 @@ function buildAliasDict(products) {
       .toUpperCase();
     if (abbr.length > 1) dict[id].add(abbr);
 
+    // ⑨ 常見錯字
     const typoMap = {
       "貴花": "桂花",
       "阿里珊": "阿里山",
@@ -47,6 +76,7 @@ function buildAliasDict(products) {
 
   return dict;
 }
+
 
 function toPinyin(str) {
   const map = {
