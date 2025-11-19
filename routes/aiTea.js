@@ -370,6 +370,14 @@ ${previousTaste ? JSON.stringify(previousTaste, null, 2) : "無"}
   "tea": "${finalBest.id}",
   "summary": "茶與性格的對應描述"
 }
+
+=== pairing ===
+{
+  "mode": "pairing",
+  "tea": "ID",
+  "reason": "推薦原因（為何適合搭配此料理）"
+}
+
 `;
 
     const completion = await client.responses.create({
