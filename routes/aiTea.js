@@ -193,7 +193,9 @@ ${message}
     input: prompt
   });
 
-  return out.output_text?.trim() || "unknown";
+  const intentRaw = out.output_text || "";
+  const intent = intentRaw.trim().replace(/[^a-z]/gi, ""); 
+  return intent || "unknown";
 }
 
 // ============================================================
