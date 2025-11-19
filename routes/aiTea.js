@@ -404,6 +404,49 @@ function detectDish(message) {
   return /雞|鴨|牛|豬|魚|蝦|蟹|飯|麵|鍋|料理|菜|湯|排|炸|烤|煎|壽司|甜點|蛋糕|餅乾|披薩|牛排|漢堡|火鍋/.test(message);
 }
 
+// -----------------------------------------
+function extractProductsFromMessage(message, products) {
+  const msg = message.replace(/\s+/g, "");
+
+  return products.filter(p =>
+    msg.includes(p.title.replace(/\s+/g, "")) ||
+    msg.includes(p.title.slice(0, 2)) ||
+    msg.includes(p.title.replace(/[茶烏龍高山金萱翠玉四季春頂級福壽]/g, ""))
+  );
+}
+
+// -----------------------------------------
+async function runCompareAI(a, b, message, previousTaste, client) {
+  const prompt = `
+你是祥興茶行的專業茶師，請比較以下兩款茶：
+
+A: ${a.title}
+B: ${b.title}
+
+使用者訊息：${message}
+
+請以以下結構回覆 JSON（不要其他文字）：
+{
+  "a": "${a.id}",
+  "b": "${b.id}",
+  "compare": {
+    "aroma": "...",
+    "body": "...",
+    "roast": "...",
+    "price": "...",
+    "summary": "..."
+  }
+}
+`;
+
+  const out = await client.responses.create({
+    model: "gpt-4.1-mini",
+    input: prompt
+  });
+
+  return JSON.parse(out.output_text);
+}
+
 
 // ============================================================
 // ⭐ 9. 主路由：多輪對話總控（dispatcher）
