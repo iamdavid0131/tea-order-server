@@ -163,7 +163,7 @@ async function classifyIntent(client, message) {
 
 分類規則（務必遵守）：
 
-1. 若訊息屬於預算/風味/對象（例如: 500、清爽、女生、長輩…）
+1. 若訊息屬於預算/風味/對象/茶名（例如: 500、清爽、女生、長輩、烏龍、綠茶…）
    → 回傳 "continue"
 
 2. 若有包含以下任一詞：
@@ -474,6 +474,153 @@ B: ${b.title}
   return JSON.parse(out.output_text);
 }
 
+// ============================================================
+// ⭐ 多輪對話：一般推薦流程（Recommend Flow V2）
+// ============================================================
+
+async function runRecommendFlow(session, message, products) {
+  const answer = interpretAnswer(message);
+
+  // ---------------------------
+  // Step 0：進來就建立 data 結構
+  // ---------------------------
+  session.data = session.data || {};
+
+  // 若使用者句子含預算（ex: 2000），直接記住
+  if (!session.step && answer.type === "budget") {
+    session.data.budget = answer.value;
+  }
+
+  // ---------------------------
+  // Step 1：問用途（新增）
+  // ---------------------------
+  if (!session.step) {
+    session.step = "ask_purpose";
+    return {
+      mode: "ask",
+      ask: "這次是自己喝，還是要送禮呢？😊",
+      options: ["自己喝", "送禮"]
+    };
+  }
+
+  // 使用者回答用途
+  if (session.step === "ask_purpose") {
+    const v = message.trim();
+
+    // → 若使用者說送禮 → 直接切到 Gift Flow
+    if (/送禮/.test(v)) {
+      session.flow = "gift";
+      session.step = null; // 重置給 Gift 流程使用
+      return await runGiftFlow(session, message, products);
+    }
+
+    // → 自己喝：繼續 recommend flow
+    session.data.purpose = "自己喝";
+    session.step = "ask_flavor";
+
+    return {
+      mode: "ask",
+      ask: "那你平常喜歡什麼風味呢？",
+      options: ["清爽", "花香", "果香", "濃郁", "不確定"]
+    };
+  }
+
+  // ---------------------------
+  // Step 2：問風味
+  // ---------------------------
+  if (session.step === "ask_flavor") {
+    session.data.flavor = answer.value || message.trim();
+
+    // 完整資料收齊 → 進入推薦核心
+    const result = runRecommendCore(session.data, products);
+    return result;
+  }
+}
+
+// ============================================================
+// ⭐ 多輪對話：一般推薦流程（Recommend Flow）
+// ============================================================
+
+function runRecommendCore(data, products) {
+  const { budget, flavor } = data;
+
+  const scored = products.map(p => {
+    let score = 0;
+
+    // 預算比對
+    if (budget) {
+      const num = parseInt(budget.replace(/[^\d]/g, ""), 10);
+      if (p.price && p.price <= num) score += 3;
+      if (p.price && p.price <= num + 200) score += 1;
+    }
+
+    // 風味比對
+    if (/清爽|清香/.test(flavor) && /清香|翠玉|四季春|高山/.test(p.title)) score += 3;
+    if (/花香/.test(flavor) && /桂花|茉莉/.test(p.title)) score += 3;
+    if (/果香/.test(flavor) && /蜜香|美人/.test(p.title)) score += 3;
+    if (/濃郁|厚/.test(flavor) && /焙火|濃香|紅茶|凍頂/.test(p.title)) score += 3;
+
+    return { ...p, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const best = scored[0] || products[0];
+  const second = scored[1] || products[1];
+
+  const reasons = [];
+  if (budget) reasons.push(`符合你設定的「${budget}」預算`);
+  if (flavor) reasons.push(`風味偏向你喜歡的「${flavor}」`);
+
+  return {
+    mode: "recommend",
+    best: {
+      id: best.id,
+      reason: reasons.join("，")
+    },
+    second: {
+      id: second.id,
+      reason: "給你另一個風味互補的選擇"
+    }
+  };
+}
+
+// ============================================================
+// ⭐ 多輪泡法流程 Brew Flow
+// ============================================================
+
+async function runBrewFlow(session, message, products) {
+
+  // 第一次進來 → 問是哪款茶
+  if (!session.step) {
+    session.step = "ask_tea";
+    return {
+      mode: "ask",
+      ask: "想了解哪款茶的泡法呢？😊",
+      options: products.map(p => p.title)
+    };
+  }
+
+  // 使用者回答茶品名稱
+  if (session.step === "ask_tea") {
+    const { best } = fuzzyMatchProduct(message, products);
+    session.data.tea = best.id;
+
+    session.step = null;
+
+    return {
+      mode: "brew",
+      tea: best.id,
+      brew: {
+        hot: "90–95°C，浸泡 50–70 秒。",
+        ice_bath: "熱沖後直接冰鎮 10 分鐘最佳。",
+        cold_brew: "10g 茶葉加入 600ml 冷水，冷藏 6–8 小時。"
+      },
+      tips: "建議用軟水風味更乾淨。",
+    };
+  }
+}
+
 
 // ============================================================
 // ⭐ 9. 主路由：多輪對話總控（dispatcher）
@@ -518,7 +665,8 @@ router.post("/", async (req, res) => {
     if (
       intent === "continue" ||
       (session.flow === "gift" && intent === "gift") ||
-      (session.flow === "pairing" && intent === "pairing")
+      (session.flow === "pairing" && intent === "pairing") ||
+      (session.flow === "recommend" && (intent === "continue" || intent === "recommend")
     ) {
       if (session.flow === "gift") {
         const result = await runGiftFlow(session, message, products, client);
@@ -527,6 +675,10 @@ router.post("/", async (req, res) => {
 
       if (session.flow === "pairing") {
         const result = await runPairingFlow(session, message, products, client);
+        return res.json({ ...result, session });
+      }
+      if (session.flow === "recommend") {
+        const result = await runRecommendFlow(session, message, products);
         return res.json({ ...result, session });
       }
     }
@@ -578,19 +730,15 @@ router.post("/", async (req, res) => {
     // ❻ brew（泡法）
     // -----------------------------------------
     if (intent === "brew") {
-      const { best } = fuzzyMatchProduct(message, products);
+      session.flow = "brew"; 
+      const result = await runBrewFlow(session, message, products);
+      return res.json({ ...result, session });
+    }
 
-      return res.json({
-        mode: "brew",
-        tea: best.id,
-        brew: {
-          hot: "90–95°C，浸泡 50–70 秒。",
-          ice_bath: "熱沖後直接冰鎮 10 分鐘最佳。",
-          cold_brew: "10g 茶葉加入 600ml 冷水，冷藏 6–8 小時。"
-        },
-        tips: "建議用軟水風味更乾淨。",
-        session
-      });
+    // 使用者正在回答泡法問題
+    if (session.flow === "brew" && intent === "continue") {
+      const result = await runBrewFlow(session, message, products);
+      return res.json({ ...result, session });
     }
 
     // -----------------------------------------
@@ -622,22 +770,15 @@ router.post("/", async (req, res) => {
     }
 
     // -----------------------------------------
-    // ❾ recommend（單輪推薦）
+    // ❾ recommend（多輪推薦）
     // -----------------------------------------
     if (intent === "recommend") {
-      const { best } = fuzzyMatchProduct(message, products);
+      session.flow = "recommend";
+      session.step = null;
 
-      // 隨機第二推薦（不要永遠同一個）
-      const others = products.filter(p => p.id !== best.id);
-      const second = others[Math.floor(Math.random() * others.length)];
-
-      return res.json({
-        mode: "recommend",
-        best: { id: best.id, reason: "香氣乾淨，風味均衡。" },
-        second: { id: second.id, reason: "風味特色與主推薦互補。" },
-        session
-      });
-    }
+      const result = await runRecommendFlow(session, message, products);
+      return res.json({ ...result, session });
+    } 
 
     // -----------------------------------------
     // ❿ unknown（當作 recommend fallback）
