@@ -146,7 +146,8 @@ function fuzzyMatchProduct(message, products) {
     }
   }
 
-  return { best, score: bestScore };
+  return { best: best || products[0], score: bestScore };
+
 }
 
 
