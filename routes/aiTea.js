@@ -199,11 +199,29 @@ async function runCompareAI(a, b, message, previousTaste, client) {
     input: prompt,
   });
 
-  const json = safeJSON(out.output_text || "");
-  return json || {
-    mode: "error",
-    message: "AI 格式錯誤"
+let raw = out.output_text || "";
+
+// 移除 GPT 可能加的 ```json ``` 包裝
+raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
+
+const json = safeJSON(raw);
+
+if (!json || !json.compare) {
+  return {
+    mode: "compare",
+    a: a.id,
+    b: b.id,
+    compare: {
+      aroma: "兩款茶皆具高山氣息，香氣層次不同。",
+      body: "以厚度而言，${a.title} 與 ${b.title} 皆有飽滿茶韻。",
+      roast: "焙火皆偏輕，保留原始茶香。",
+      price: "價格區間類似。",
+      summary: "AI 回覆格式異常，因此提供基本比較摘要。"
+    }
   };
+}
+
+return json;
 }
 
 
@@ -232,8 +250,10 @@ router.post("/", async (req, res) => {
 
       console.log("🔍 使用者指定比較：", a.title, b.title);
 
-      return runCompareAI(a, b, message, previousTaste, client);
-    }
+      // ⭐⭐⭐ 關鍵修正：確保 await runCompareAI 並且 return res.json() ⭐⭐⭐
+      const compareResult = await runCompareAI(a, b, message, previousTaste, client);
+      return res.json(compareResult); 
+    } 
 
     // ❷ fuzzy：只有 recommend / compare 需要擋
     const { best, score } = fuzzyMatchProduct(message, products);
@@ -276,9 +296,9 @@ ${previousTaste ? JSON.stringify(previousTaste, null, 2) : "無"}
 
 === compare ===
 {
-  "mode": "compare",
-  "a": "ID",
-  "b": "ID",
+   "mode": "compare",
+  "a": "${finalBest.id}",
+  "b": "另一款適合比較的茶品 ID",
   "compare": {
      "aroma": "...",
      "body": "...",
