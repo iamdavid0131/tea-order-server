@@ -343,6 +343,9 @@ async function runPairingFlow(session, message, products, client) {
 
   if (session.step === "ask_style") {
     session.data.style = answer.value;
+    // 🚀 防重複觸發 pairing
+    session.flow = null;
+    session.step = null;
 
     return runPairingRecommend(session.data, products);
   }
@@ -473,7 +476,7 @@ router.post("/", async (req, res) => {
     // --------------------------------------------------
     // 🔥 若使用者訊息是料理 → 強制切換成 pairing flow
     // --------------------------------------------------
-    if (detectDish(message) && session.flow !== "pairing") {
+    if (!session.flow && detectDish(message)) {
       console.log("🍱 觸發搭餐流程（由料理偵測器）");
 
       session.flow = "pairing";
