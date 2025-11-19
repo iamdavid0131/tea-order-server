@@ -330,7 +330,7 @@ async function runPairingFlow(session, message, products, client) {
   }
 
   if (session.step === "ask_dish") {
-    session.data.dish = answer.value;
+    session.data.dish = message;
 
     // Step 2：詢問偏好風味
     session.step = "ask_style";
@@ -355,31 +355,55 @@ async function runPairingFlow(session, message, products, client) {
 // ============================================================
 
 function runPairingRecommend(data, products) {
-  const { dish, style } = data;
+  const dish = data.dish;
 
-  let tea;
+  let tea = null;
 
-  if (dish === "烤鴨") {
-    tea = products.find(t => /美人|東方/.test(t.title)) ||
-          products.find(t => /梨山/.test(t.title));
-  } else if (dish === "牛排") {
-    tea = products.find(t => /焙火|濃郁/.test(t.title)) ||
-          products.find(t => /金萱/.test(t.title));
-  } else if (dish === "火鍋") {
-    tea = products.find(t => /清香|高山/.test(t.title));
-  } else {
-    tea = products[0];
+  // --- 分類類型 ---
+  const warm = /(雞|薑母鴨|羊肉|燉|湯)/;
+  const heavy = /(牛排|牛肉|燉肉|漢堡|披薩|焗烤|奶油)/;
+  const fresh = /(壽司|生魚|沙拉|輕食)/;
+  const spicy = /(麻辣|辣|川味|韓式)/;
+  const fried = /(炸|酥|脆|唐揚|薯條)/;
+  const sweet = /(甜|蛋糕|餅乾|甜點|可麗餅)/;
+  const hotpot = /(鍋|火鍋|涮|煲)/;
+
+  if (warm.test(dish)) {
+    tea = products.find(t => /紅茶|蜜香|美人/.test(t.title));
+  } else if (heavy.test(dish)) {
+    tea = products.find(t => /濃|焙火|金萱|凍頂/.test(t.title));
+  } else if (fresh.test(dish)) {
+    tea = products.find(t => /清香|高山|梨山|阿里/.test(t.title));
+  } else if (spicy.test(dish)) {
+    tea = products.find(t => /清爽|翠玉|四季春/.test(t.title));
+  } else if (fried.test(dish)) {
+    tea = products.find(t => /清爽|翠玉/.test(t.title));
+  } else if (sweet.test(dish)) {
+    tea = products.find(t => /桂花|茉莉/.test(t.title));
+  } else if (hotpot.test(dish)) {
+    tea = products.find(t => /高山|金萱|清香/.test(t.title));
   }
 
-  if (!tea) tea = products[0];
+  // fallback
+  if (!tea) {
+    tea = products[0];
+  }
 
   return {
     mode: "pairing",
     tea: tea.id,
-    summary: `搭配「${dish}」，建議選擇 ${tea.title}。`,
-    reason: `${tea.title} 的風味能中和 ${dish} 的特徵，特別適合 ${style} 風格需求。`
+    summary: `搭配「${dish}」時，建議選擇 ${tea.title}。`,
+    reason: `${tea.title} 的風味能平衡「${dish}」的料理特性。`
   };
 }
+
+// -----------------------------------------
+// 🔥 料理偵測器：使用者輸入包含「xxx雞」「xxx肉」「xxx飯」「麵」「鍋」… → 直接視為搭餐
+// -----------------------------------------
+function detectDish(message) {
+  return /雞|鴨|牛|豬|魚|蝦|蟹|飯|麵|鍋|料理|菜|湯|排|炸|烤|煎|壽司|甜點|蛋糕|餅乾|披薩|牛排|漢堡|火鍋/.test(message);
+}
+
 
 // ============================================================
 // ⭐ 9. 主路由：多輪對話總控（dispatcher）
@@ -402,6 +426,19 @@ router.post("/", async (req, res) => {
     // -----------------------------------------
     const intent = await classifyIntent(client, message);
     console.log("🔍 Intent =", intent);
+
+    // --------------------------------------------------
+    // 🔥 若使用者訊息是料理 → 強制切換成 pairing flow
+    // --------------------------------------------------
+    if (detectDish(message)) {
+      console.log("🍱 觸發搭餐流程（由料理偵測器）");
+      session.flow = "pairing";
+      session.step = null;
+
+      const result = await runPairingFlow(session, message, products, client);
+      return res.json({ ...result, session });
+    }
+
 
     // -----------------------------------------
     // ❷ 使用者正在回答上一輪問題（continue）
