@@ -168,7 +168,7 @@ async function classifyIntent(client, message) {
 `;
 
   const out = await client.responses.create({
-    model: "gpt-4.1",
+    model: "gpt-4.1-mini",
     input: prompt
   });
 
@@ -425,7 +425,7 @@ B: ${b.title}
 `;
 
   const out = await client.responses.create({
-    model: "gpt-4.1",
+    model: "gpt-4.1-mini",
     input: prompt
   });
 
@@ -561,6 +561,8 @@ function runRecommendCore(data, products) {
 // ============================================================
 
 router.post("/", async (req, res) => {
+  console.log("🚀 AI Tea Router — NEW VERSION RUNNING");
+
   try {
     const { message, products, previousTaste, session: clientSession } = req.body;
 
