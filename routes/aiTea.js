@@ -487,7 +487,11 @@ router.post("/", async (req, res) => {
     // -----------------------------------------
     // ❷ 使用者正在回答上一輪問題（continue）
     // -----------------------------------------
-    if (intent === "continue") {
+    if (
+      intent === "continue" ||
+      (session.flow === "gift" && intent === "gift") ||
+      (session.flow === "pairing" && intent === "pairing")
+    ) {
       if (session.flow === "gift") {
         const result = await runGiftFlow(session, message, products, client);
         return res.json({ ...result, session });
@@ -511,15 +515,16 @@ router.post("/", async (req, res) => {
     }
 
     // -----------------------------------------
-    // ❹ flow = pairing（搭餐多輪）
+    // ❹ flow = pairing（搭餐多輪啟動）
     // -----------------------------------------
-    if (intent === "pairing") {
+    if (intent === "pairing" && session.flow !== "pairing") {
       session.flow = "pairing";
       session.step = null;
 
       const result = await runPairingFlow(session, message, products, client);
       return res.json({ ...result, session });
     }
+
 
     // -----------------------------------------
     // ❺ compare：如果找出 2 個茶 → 比較
