@@ -139,42 +139,24 @@ async function classifyIntent(client, message) {
     return "continue";
   }
   const prompt = `
-你是祥興茶行 AI 導購意圖分類器。
-
-請只依照「字面關鍵字」判斷，不要推測、不猜用意。
-
-規則：
-1. 若訊息「完全是回答」例如：
-   - 純預算（數字）
-   - 單一風味（清爽、花香、果香）
-   - 單一對象（女生、長輩）
-   這才是 continue
-
-2. 若包含：
-   ["送禮", "禮物", "送茶"]
-   → 回傳 "gift"
-
-3. 若包含食物：
-   ["雞","鴨","牛排","牛肉","火鍋","壽司","麵","飯","炸","甜點"]
-   → 回傳 "pairing"
-
-4. 若包含：
-   ["比較","差別","哪個好"]
-   → 回傳 "compare"
-
-5. 若包含：
-   ["泡法","怎麼泡","沖法"]
-   → 回傳 "brew"
-
-6. 若包含：
-   ["推薦","想喝"]
-   → 回傳 "recommend"
-
-7. 其他全部 → 回傳 "recommend"
-
-請只回傳分類字串，不要解釋。
-訊息：${message}
-`;
+  你是祥興茶行的資深侍茶師。請判斷客人的這句話想做什麼。
+  
+  客人說：「${msg}」
+  
+  請依照以下邏輯分類，只回傳分類代碼：
+  
+  1. **gift** (送禮)：提到送人、長輩、客戶、伴手禮。
+  2. **pairing** (搭餐)：提到任何食物、下午茶、解膩、剛吃飽。
+  3. **brew** (泡法)：問溫度、冷泡、怎麼泡、水量。
+  4. **compare** (比較)：問差別、這兩款哪個好、A跟B不一樣在哪。
+  5. **recommend** (推薦)：
+     - 表達口味 (清爽、濃、香)。
+     - 表達心情 (想喝茶、提神)。
+     - 混合需求 (我要找好喝的烏龍)。
+  
+  若無法判斷，預設回傳 "recommend"。
+  請只回傳一個英文單字。
+  `;
 
   const out = await client.responses.create({
     model: "gpt-4.1-mini",
@@ -192,79 +174,115 @@ async function classifyIntent(client, message) {
 // ⭐ 4. 解析使用者回答
 // ============================================================
 
-function interpretAnswer(message) {
-  const msg = message.trim();
+// ✨ 新版：使用 LLM 解析回答，支援一次抓多個參數
+async function interpretAnswerWithLLM(client, message, currentData) {
+  const prompt = `
+  使用者正在選購茶葉。目前的已知需求：${JSON.stringify(currentData)}
+  使用者的最新回答：「${message}」
 
+  請從回答中萃取以下資訊（若未提到則回傳 null）：
+  1. target (對象：長輩/年輕人/客戶/自己...)
+  2. budget (預算：數字或區間)
+  3. flavor (口味：清香/焙火/果香/濃郁...)
+  4. purpose (用途：送禮/自飲)
+
+  請直接回傳 JSON 格式：
+  {"target":..., "budget":..., "flavor":..., "purpose":...}
+  `;
+
+  const out = await client.responses.create({
+    model: "gpt-4o-mini", // 建議使用 4o-mini 速度快且便宜
+    input: prompt,
+    response_format: { type: "json_object" } // 強制 JSON
+  });
+
+  return JSON.parse(out.output_text);
+}
+
+// ✨ 新版：動態生成推薦理由
+async function generatePersuasiveReason(client, tea, userNeeds) {
+  const prompt = `
+  你是祥興茶行老闆。
+  客人需求：${JSON.stringify(userNeeds)}
+  我們要推薦：${tea.title} (特色：${tea.desc || tea.tags})
   
+  請用一句話（30字內）告訴客人為什麼這款茶適合他。
+  語氣要溫暖、專業，不要太像機器人。
+  例如：「因為您喜歡花香，這款金萱獨特的奶桂香氣，喝起來非常順口喔！」
+  `;
 
-   if (/^\$?\d+\s*$/.test(msg)){
-    return { type: "budget", value: msg };
-  }
-
-  const targets = ["長輩", "女生", "男性", "男生", "主管", "同事", "朋友", "客戶"];
-  if (targets.includes(msg)) {
-    return { type: "target", value: msg };
-  }
-
-  const flavors = ["清爽", "濃郁", "香氣", "花香", "果香", "奶香", "無糖", "厚實"];
-  if (flavors.includes(msg)) {
-    return { type: "flavor", value: msg };
-  }
-
-  return { type: "text", value: msg };
+  const out = await client.responses.create({
+    model: "gpt-4o-mini",
+    input: prompt
+  });
+  
+  return out.output_text;
 }
 
 // ============================================================
-// ⭐ 5. Gift Flow（多輪送禮流程）
+// ⭐ 5. Gift Flow（智慧型多輪送禮流程）
 // ============================================================
 
+// ⚠️ 注意：參數要加上 client，因為我們要呼叫 OpenAI
 async function runGiftFlow(session, message, products, client) {
-  const answer = interpretAnswer(message);
+  
+  // 1. 先用 LLM 理解使用者的整句話 (取代原本的 interpretAnswer)
+  //    這能一次抓出：對象、預算、口味
+  const extracted = await interpretAnswerWithLLM(client, message, session.data);
+  
+  // 2. 把抓到的資料合併進 session (保留舊資料，更新新資料)
+  session.data = { ...session.data, ...extracted };
+  
+  console.log("🧠 目前收集到的資料：", session.data);
 
-  if (!session.step) {
+  // 3. 檢查還缺什麼資料 (Checklist)
+  //    如果資料有了，就自動跳過問答
+  
+  // --- (A) 缺對象？ ---
+  if (!session.data.target) {
     session.step = "ask_target";
     return {
       mode: "ask",
-      ask: "想送給誰呢？",
+      ask: "請問想送給誰呢？（例如：長輩、主管、朋友...）",
       options: ["長輩", "女生", "主管", "同事", "朋友"]
     };
   }
 
-  if (session.step === "ask_target") {
-    session.data.target = answer.value;
+  // --- (B) 缺預算？ ---
+  if (!session.data.budget) {
     session.step = "ask_budget";
-
     return {
       mode: "ask",
-      ask: "了解！那預算大概在哪一區間呢？",
+      ask: `了解是要送給${session.data.target}。請問預算大概多少？`,
       options: ["500 以內", "500–1000", "1000–2000", "不限"]
     };
   }
 
-  if (session.step === "ask_budget") {
-    session.data.budget = answer.value;
+  // --- (C) 缺口味？ ---
+  if (!session.data.flavor) {
     session.step = "ask_flavor";
-
     return {
       mode: "ask",
-      ask: "那對方平常喜歡什麼風味？",
+      ask: "那對方平常喜歡什麼口味或香氣？",
       options: ["清爽", "花香", "果香", "濃郁", "不確定"]
     };
   }
 
-  if (session.step === "ask_flavor") {
-    session.data.flavor = answer.value;
-    return runGiftRecommend(session.data, products);
-  }
+  // 4. 資料都齊全了 -> 進入推薦生成
+  //    ⚠️ 這裡要傳入 client 才能寫出動態理由
+  return await runGiftRecommend(session.data, products, client);
 }
 
+
+
 // ============================================================
-// ⭐ 6. Gift Recommend Core
+// ⭐ 6. Gift Recommend Core (動態理由版)
 // ============================================================
 
-function runGiftRecommend(data, products) {
+async function runGiftRecommend(data, products, client) {
   const { target, budget, flavor } = data;
 
+  // ... (這裡保留原本的 findTea 篩選邏輯) ...
   function findTea(filter) {
     return products.find(t => {
       if (filter.target && !filter.target.includes(target)) return false;
@@ -281,11 +299,14 @@ function runGiftRecommend(data, products) {
     findTea({}) ||
     products[0];
 
+  // 🔥 關鍵修改：讓 LLM 根據「茶」與「客人需求」寫推薦語
+  const reason = await generatePersuasiveReason(client, tea, data);
+
   return {
     mode: "gift",
     tea: tea.id,
-    summary: `依照「${target} / ${budget} / ${flavor}」，這款最適合。`,
-    reason: `${tea.title} 的風味最能符合你的送禮目的。`
+    summary: `為您挑選了最適合${target}的茶款`, // 標題簡單就好
+    reason: reason // 這裡放入 AI 寫的有溫度文案
   };
 }
 
@@ -482,42 +503,48 @@ async function runBrewFlow(session, message, products) {
 // ⭐ 11. Recommend Flow（一般推薦多輪）
 // ============================================================
 
-async function runRecommendFlow(session, message, products) {
-  const answer = interpretAnswer(message);
+// ============================================================
+// ⭐ 11. Recommend Flow（智慧型推薦）
+// ============================================================
 
-  if (!session.step) {
-    session.step = "ask_purpose";
+async function runRecommendFlow(session, message, products, client) { // 記得加 client
+  // 1. LLM 理解
+  const extracted = await interpretAnswerWithLLM(client, message, session.data);
+  session.data = { ...session.data, ...extracted };
 
-    return {
-      mode: "ask",
-      ask: "這次是自己喝，還是要送禮呢？😊",
-      options: ["自己喝", "送禮"]
-    };
+  // 2. 特殊判斷：如果 LLM 發現使用者其實是想送禮，切換跑道
+  if (session.data.purpose === "送禮" || /送禮/.test(message)) {
+    session.flow = "gift";
+    return await runGiftFlow(session, message, products, client);
   }
 
-  if (session.step === "ask_purpose") {
-    if (/送禮/.test(message)) {
-      session.flow = "gift";
-      session.step = null;
-      return await runGiftFlow(session, message, products);
-    }
+  // 3. 檢查缺少的資料
+  
+  // (A) 缺用途？ (如果 LLM 沒抓到，預設問一下，或直接預設為自飲)
+  if (!session.data.purpose) {
+     session.step = "ask_purpose";
+     return {
+       mode: "ask",
+       ask: "這次是自己喝，還是要送禮呢？😊",
+       options: ["自己喝", "送禮"]
+     };
+  }
 
-    session.data.purpose = "自己喝";
+  // (B) 缺口味？
+  if (!session.data.flavor) {
     session.step = "ask_flavor";
-
     return {
       mode: "ask",
-      ask: "那你平常喜歡什麼風味呢？",
+      ask: "那你平常喜歡什麼風味呢？(例如：清爽、花香、濃郁)",
       options: ["清爽", "花香", "果香", "濃郁", "不確定"]
     };
   }
 
-  if (session.step === "ask_flavor") {
-    session.data.flavor = answer.value || message.trim();
-
-    const result = runRecommendCore(session.data, products);
-    return result;
-  }
+  // 4. 資料齊全 -> 推薦
+  //    這裡也可以考慮加上 generatePersuasiveReason，看你想不想讓一般推薦也變聰明
+  //    目前先維持呼叫 Core，但可以把 result 改成 async
+  const result = runRecommendCore(session.data, products);
+  return result;
 }
 
 // ============================================================
@@ -607,7 +634,10 @@ router.post("/", async (req, res) => {
       (session.flow === "brew" && intent === "brew") ||
       (session.flow === "recommend" && intent === "recommend")
     ) {
-      if (session.flow === "gift") {
+    // 🚀 啟動 Gift (或是 continue 裡的 gift)
+      if (intent === "gift" || (session.flow === "gift" && intent === "continue")) { // 邏輯要涵蓋 continue
+        session.flow = "gift";
+        // ⚠️ 傳入 client
         const result = await runGiftFlow(session, message, products, client);
         return res.json({ ...result, session });
       }
@@ -622,8 +652,11 @@ router.post("/", async (req, res) => {
         return res.json({ ...result, session });
       }
 
-      if (session.flow === "recommend") {
-        const result = await runRecommendFlow(session, message, products);
+      // 🚀 啟動 Recommend
+      if (intent === "recommend" || (session.flow === "recommend" && intent === "continue")) {
+        session.flow = "recommend";
+        // ⚠️ 傳入 client
+        const result = await runRecommendFlow(session, message, products, client);
         return res.json({ ...result, session });
       }
     }
