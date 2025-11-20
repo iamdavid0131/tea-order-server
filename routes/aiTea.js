@@ -48,20 +48,36 @@ function findProductInMessage(message, products) {
 // ============================================================
 
 // 🛠️ 1-1. 全局資訊萃取
+// 🛠️ 1-1. 全局資訊萃取 + 自動口味側寫
 async function extractEntities(client, message, currentData) {
+  // 取得目前的側寫標籤 (如果有的話)
+  const currentTags = currentData.tags || [];
+
   const prompt = `
   使用者正在與茶行 AI 對話。
-  目前的已知資訊：${JSON.stringify(currentData)}
-  使用者的最新訊息：「${message}」
-
-  請更新或萃取以下資訊（若未提到回傳 null）：
+  使用者最新訊息：「${message}」
+  
+  請執行兩個任務：
+  
+  【任務 A：更新基本資訊】(若未提到回傳 null)
   1. target (對象)
-  2. budget (預算數字)
-  3. flavor (口味)
-  4. purpose (送禮/自飲)
-  5. dish (搭配料理名稱，如牛排、甜點)
+  2. budget (預算)
+  3. purpose (送禮/自飲)
+  4. dish (搭配料理)
 
-  回傳 JSON。
+  【任務 B：口味特徵側寫 (Profiling)】
+  請根據這句話，判斷使用者的口味偏好，回傳一個標籤陣列 (tags)。
+  - 若提到 "怕澀" -> 加 "喜甜/滑順"
+  - 若提到 "剛吃飽" -> 加 "解膩"
+  - 若提到 "喜歡重口味" -> 加 "喜焙火"
+  - 若提到 "喜歡清淡" -> 加 "喜高山/清香"
+  - 若無明顯偏好，回傳空陣列 []
+  
+  回傳 JSON:
+  {
+    "target": "...", "budget": "...", "purpose": "...", "dish": "...",
+    "new_tags": ["喜甜", "喜焙火"] 
+  }
   `;
 
   try {
@@ -73,7 +89,16 @@ async function extractEntities(client, message, currentData) {
       ],
       response_format: { type: "json_object" }
     });
-    return JSON.parse(completion.choices[0].message.content);
+    
+    const res = JSON.parse(completion.choices[0].message.content);
+    
+    // 邏輯：將新標籤合併到舊標籤，並去重 (Set)
+    const mergedTags = [...new Set([...currentTags, ...(res.new_tags || [])])];
+
+    return {
+      ...res,
+      tags: mergedTags // 更新後的標籤庫
+    };
   } catch (e) {
     return {};
   }
@@ -215,32 +240,138 @@ async function runRecommendFlow(session, products, client) {
 }
 
 // 🍽️ 搭餐流程
+// 🍽️ 搭餐流程 (中醫食補版)
 async function runPairingFlow(session, products, client) {
   const d = session.data;
 
   if (!d.dish) {
     return {
       mode: "ask",
-      ask: "今晚想搭配什麼料理呢？（例如：牛排、壽司、甜點...）",
-      options: ["油膩大餐", "精緻甜點", "海鮮/壽司", "炸物"]
+      ask: "想搭配什麼料理呢？阿興師可以用中醫食補的角度幫您配茶喔！（例如：大閘蟹、麻辣鍋、月餅...）",
+      options: ["大餐/解膩", "甜點", "海鮮/壽司", "炸物"]
     };
   }
+
+  // 呼叫 AI 做中醫分析
+  return await recommendTCMTea(client, d.dish, products);
+}
+
+// 🧠 中醫食補推薦核心
+async function recommendTCMTea(client, dish, products) {
+  const prompt = `
+  你是精通中醫食療的茶師「阿興師」。
+  客人想吃：「${dish}」。
+
+  請執行以下思考步驟：
+  1. 分析「${dish}」的中醫屬性（寒涼、燥熱、油膩、甜膩）。
+  2. 根據「陰陽調和」原理，挑選一款最能平衡身體的茶。
+     - 寒涼食物 (如蟹、生魚片) -> 配 溫熱性茶 (紅茶、重焙火烏龍、東方美人)。
+     - 燥熱食物 (如炸雞、麻辣鍋) -> 配 涼性茶 (清香烏龍、高山茶、綠茶)。
+     - 油膩 -> 配 分解脂肪強的茶 (凍頂烏龍、高山茶)。
+     - 甜膩 -> 配 爽口解甜的茶 (紅茶、蜜香)。
   
-  // 簡單搭餐邏輯 (輔助)
-  let tag = "清香";
-  if (/牛|豬|炸|膩/.test(d.dish)) tag = "焙火";
-  if (/甜|糕|餅/.test(d.dish)) tag = "紅茶";
-  if (/魚|鮮|生/.test(d.dish)) tag = "清香";
+  可選茶品清單：
+  ${products.map(p => `${p.id}:${p.title}(${p.tags})`).join(", ")}
 
-  const tea = products.find(p => p.tags?.includes(tag) || p.title.includes(tag)) || products[0];
-  const reason = await generatePersuasiveReason(client, tea, { ...d, flavor: tag });
+  請回傳 JSON:
+  {
+    "tea_id": "選中的產品ID",
+    "food_nature": "食物屬性(例如：屬於寒性食物)",
+    "tea_nature": "茶屬性(例如：具有溫補暖胃的效果)",
+    "reason": "30字內的推薦理由，請用中醫/養生角度解釋為什麼這樣搭 (例如：螃蟹性寒，這款紅玉紅茶能暖胃驅寒，避免腸胃不適)。"
+  }
+  `;
 
-  return {
-    mode: "pairing",
-    tea: tea.id,
-    summary: `搭配「${d.dish}」的最佳選擇`,
-    reason: reason
-  };
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "只回傳 JSON" },
+        { role: "user", content: prompt }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const res = JSON.parse(completion.choices[0].message.content);
+    const tea = products.find(p => p.id === res.tea_id) || products[0];
+
+    return {
+      mode: "pairing",
+      tea: tea.id,
+      summary: `搭配「${dish}」的養生首選`, // 標題
+      reason: res.reason // 這裡會顯示中醫的理由
+    };
+
+  } catch (e) {
+    console.error("TCM Error", e);
+    // 兜底：如果 AI 失敗，用簡單邏輯
+    const tea = products[0];
+    return {
+      mode: "pairing",
+      tea: tea.id,
+      summary: `搭配「${dish}」的推薦`,
+      reason: "這款茶風味獨特，非常適合搭配餐點享用。"
+    };
+  }
+}
+
+// 📸 視覺搭餐核心 (GPT-4o-mini Vision)
+async function recommendTeaByImage(client, base64Image, products) {
+  const prompt = `
+  這是一張客人正在吃的食物照片。
+  請扮演「祥興茶行阿興師」，以中醫食療與風味平衡的角度：
+  
+  1. 觀察照片中的食物（是什麼？看起來油膩嗎？是甜點還是大餐？屬性是寒涼還是燥熱？）。
+  2. 從下方茶品清單中，挑選 **1 款** 最適合搭配的茶。
+  3. 給出推薦理由。
+  
+  可選茶品：
+  ${products.map(p => `${p.id}:${p.title}(${p.tags})`).join(", ")}
+
+  請回傳 JSON:
+  {
+    "food_detected": "偵測到的食物名稱 (例如：麻辣鍋)",
+    "tea_id": "推薦的產品ID",
+    "reason": "30-50字的推薦理由 (例如：這鍋看起來紅通通的，屬於燥熱油膩，建議搭配凍頂烏龍來去油解膩...)"
+  }
+  `;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: base64Image } } // 👈 GPT-4o-mini 支援直接吃 Base64
+          ],
+        },
+      ],
+      max_tokens: 500,
+    });
+
+    // 解析 JSON (有時候模型會包在 ```json ... ``` 裡，做個簡單處理)
+    let content = response.choices[0].message.content;
+    content = content.replace(/```json|```/g, "").trim();
+    const res = JSON.parse(content);
+
+    const tea = products.find(p => p.id === res.tea_id) || products[0];
+
+    return {
+      mode: "pairing", // 重用前端的搭餐 UI
+      tea: tea.id,
+      summary: `👁️ 阿興師看到你在吃「${res.food_detected}」！`,
+      reason: res.reason
+    };
+
+  } catch (e) {
+    console.error("Vision Error:", e);
+    return {
+      mode: "recommend",
+      best: { id: products[0].id, reason: "這張照片看起來太美味了，阿興師一時看餓了...不如先來杯招牌茶解解饞？" }
+    };
+  }
 }
 
 // 🎭 性格測驗流程
@@ -340,9 +471,22 @@ async function runProductRecommendation(mode, data, products, client) {
 
 router.post("/", async (req, res) => {
   try {
-    const { message, products, session: clientSession } = req.body;
+   // 👈 記得解構 image
+    const { message, image, products, session: clientSession } = req.body; 
     const client = new OpenAI({ apiKey: process.env.OPENAI_KEY });
     let session = clientSession ?? initSession();
+
+    // 🔥 強制介入：如果有圖片，直接走視覺流程，不跑下面的文字邏輯
+    if (image) {
+      console.log("📸 收到圖片，啟動阿興師之眼...");
+      const result = await recommendTeaByImage(client, image, products);
+      
+      // 設定一下 session 狀態，讓對話看起來自然
+      session.flow = "pairing";
+      session.data.dish = "圖片食物"; // 標記一下
+      
+      return res.json({ ...result, session });
+    }
 
     // 🚀 優化：只有「不在」性格測驗流程時，才去萃取資訊 (省錢 + 避免誤判)
     if (session.flow !== "personality") {
