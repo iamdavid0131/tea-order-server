@@ -132,42 +132,44 @@ function fuzzyMatchProduct(message, products) {
 // ============================================================
 
 async function classifyIntent(client, message) {
-    const msg = message.trim();
+  const msg = message.trim();
 
   // 🔥【規則 0】只有純預算（整句都是數字）才 continue
   if (/^\$?\d+\s*$/.test(msg)) {
     return "continue";
   }
+
   const prompt = `
   你是祥興茶行的資深侍茶師。請判斷客人的這句話想做什麼。
-  
   客人說：「${msg}」
   
-  請依照以下邏輯分類，只回傳分類代碼：
+  分類代碼：
+  1. gift (送禮)
+  2. pairing (搭餐)
+  3. brew (泡法)
+  4. compare (比較)
+  5. recommend (推薦)
   
-  1. **gift** (送禮)：提到送人、長輩、客戶、伴手禮。
-  2. **pairing** (搭餐)：提到任何食物、下午茶、解膩、剛吃飽。
-  3. **brew** (泡法)：問溫度、冷泡、怎麼泡、水量。
-  4. **compare** (比較)：問差別、這兩款哪個好、A跟B不一樣在哪。
-  5. **recommend** (推薦)：
-     - 表達口味 (清爽、濃、香)。
-     - 表達心情 (想喝茶、提神)。
-     - 混合需求 (我要找好喝的烏龍)。
-  
-  若無法判斷，預設回傳 "recommend"。
-  請只回傳一個英文單字。
+  只回傳分類代碼單字，不要標點符號。
   `;
 
-  const out = await client.responses.create({
-    model: "gpt-4.1-mini",
-    input: prompt
-  });
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "user", content: prompt }
+      ]
+    });
 
-  const result = out.output_text?.trim()?.toLowerCase();
-  return ["recommend", "compare", "brew", "gift", "pairing", "continue"]
-    .includes(result)
-    ? result
-    : "recommend";
+    const result = completion.choices[0].message.content?.trim()?.toLowerCase();
+    return ["recommend", "compare", "brew", "gift", "pairing", "continue"]
+      .includes(result)
+      ? result
+      : "recommend";
+  } catch (e) {
+    console.error("意圖分類錯誤:", e);
+    return "recommend"; // 預設回傳
+  }
 }
 
 // ============================================================
@@ -175,6 +177,7 @@ async function classifyIntent(client, message) {
 // ============================================================
 
 // ✨ 新版：使用 LLM 解析回答，支援一次抓多個參數
+// ✨ 修正版：使用標準 Chat Completions API
 async function interpretAnswerWithLLM(client, message, currentData) {
   const prompt = `
   使用者正在選購茶葉。目前的已知需求：${JSON.stringify(currentData)}
@@ -190,16 +193,25 @@ async function interpretAnswerWithLLM(client, message, currentData) {
   {"target":..., "budget":..., "flavor":..., "purpose":...}
   `;
 
-  const out = await client.responses.create({
-    model: "gpt-4o-mini", // 建議使用 4o-mini 速度快且便宜
-    input: prompt,
-    response_format: { type: "json_object" } // 強制 JSON
-  });
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini", // 建議使用 gpt-4o-mini
+      messages: [
+        { role: "system", content: "你是一個 JSON 資料萃取助手，只回傳 JSON，不要有 Markdown 標記。" },
+        { role: "user", content: prompt }
+      ],
+      response_format: { type: "json_object" } // ✅ 這是正確的標準語法
+    });
 
-  return JSON.parse(out.output_text);
+    const content = completion.choices[0].message.content;
+    return JSON.parse(content);
+  } catch (e) {
+    console.error("LLM 解析錯誤:", e);
+    return {}; // 失敗時回傳空物件避免當機
+  }
 }
 
-// ✨ 新版：動態生成推薦理由
+// ✨ 修正版：使用標準 Chat Completions API
 async function generatePersuasiveReason(client, tea, userNeeds) {
   const prompt = `
   你是祥興茶行老闆。
@@ -211,14 +223,20 @@ async function generatePersuasiveReason(client, tea, userNeeds) {
   例如：「因為您喜歡花香，這款金萱獨特的奶桂香氣，喝起來非常順口喔！」
   `;
 
-  const out = await client.responses.create({
-    model: "gpt-4o-mini",
-    input: prompt
-  });
-  
-  return out.output_text;
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "user", content: prompt }
+      ]
+    });
+    
+    return completion.choices[0].message.content;
+  } catch (e) {
+    console.error("文案生成錯誤:", e);
+    return "這款茶非常適合您的需求！"; // 降級備案
+  }
 }
-
 // ============================================================
 // ⭐ 5. Gift Flow（智慧型多輪送禮流程）
 // ============================================================
@@ -435,33 +453,40 @@ function extractProductsFromMessage(message, products) {
 
 async function runCompareAI(a, b, message, previousTaste, client) {
   const prompt = `
-你是祥興茶行的專業茶師，請比較以下兩款茶：
+  你是祥興茶行的專業茶師，請比較以下兩款茶：
+  A: ${a.title}
+  B: ${b.title}
+  使用者訊息：${message}
 
-A: ${a.title}
-B: ${b.title}
-
-使用者訊息：${message}
-
-請以以下結構回覆 JSON（不要多餘文字）:
-{
-  "a": "${a.id}",
-  "b": "${b.id}",
-  "compare": {
-    "aroma": "...",
-    "body": "...",
-    "roast": "...",
-    "price": "...",
-    "summary": "..."
+  請以以下結構回覆 JSON:
+  {
+    "a": "${a.id}",
+    "b": "${b.id}",
+    "compare": {
+      "aroma": "...",
+      "body": "...",
+      "roast": "...",
+      "price": "...",
+      "summary": "..."
+    }
   }
-}
-`;
+  `;
 
-  const out = await client.responses.create({
-    model: "gpt-4.1-mini",
-    input: prompt
-  });
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "Output valid JSON only." },
+        { role: "user", content: prompt }
+      ],
+      response_format: { type: "json_object" }
+    });
 
-  return JSON.parse(out.output_text);
+    return JSON.parse(completion.choices[0].message.content);
+  } catch (e) {
+    console.error("比較功能錯誤:", e);
+    return { mode: "error" };
+  }
 }
 
 // ============================================================
