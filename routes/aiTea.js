@@ -248,18 +248,37 @@ async function runGiftFlow(session, products, client) {
 async function runRecommendFlow(session, products, client) {
   const d = session.data;
 
+  // Step 1: 缺用途？
   if (!d.purpose) {
     session.step = "ask_purpose";
-    return { mode: "ask", ask: "這次是自己喝，還是要送禮呢？😊", options: ["自己喝", "送禮"] };
+    return {
+      mode: "ask",
+      ask: "請問這次是想自己喝，還是要送禮呢？😊",
+      options: ["自己喝", "送禮"]
+    };
   }
-  if (d.purpose.includes("送禮")) {
+
+  // 🚦 轉彎：如果發現是送禮
+  if (d.purpose.includes("送禮") || d.purpose.includes("禮物")) {
     session.flow = "gift"; 
     return runGiftFlow(session, products, client);
   }
-  if (!d.flavor) {
+
+  // Step 2: 缺口味？
+  // 🔥【關鍵修正】除了檢查 flavor，也要檢查 tags 是否有值
+  // 只要 tags 裡有東西 (例如 '喜高山')，就代表使用者已經回答了，不用再問
+  const hasFlavor = d.flavor || (d.tags && d.tags.length > 0);
+
+  if (!hasFlavor) {
     session.step = "ask_flavor";
-    return { mode: "ask", ask: "您平常比較喜歡什麼樣的風味？", options: ["清爽/高山氣", "花香/烏龍", "濃郁/焙火", "蜜香/紅茶"] };
+    return {
+      mode: "ask",
+      ask: "您平常比較喜歡什麼樣的茶湯風味？",
+      options: ["清爽/高山氣", "花香/烏龍", "濃郁/焙火", "蜜香/紅茶"]
+    };
   }
+  
+  // 🎉 資料齊全 -> 推薦
   return await runProductRecommendation("self", d, products, client);
 }
 
@@ -519,28 +538,64 @@ async function generateSoulText(client, tea, userState) {
   }
 }
 
-// 🔍 推薦核心 (共用)
+
+// 🔍 推薦核心 (修正版：加入 Tags 加權)
 async function runProductRecommendation(mode, data, products, client) {
-  const { target, budget, flavor } = data;
+  const { target, budget, flavor, tags } = data;
+
+  // 簡易計分排序
   const scored = products.map(p => {
     let score = 0;
-    const text = (p.title + p.tags).toLowerCase();
+    const text = (p.title + p.tags + p.desc).toLowerCase();
+    
+    // 1. 口味比對 (Flavor)
     if (flavor && text.includes(flavor.replace("不確定", ""))) score += 5;
+
+    // 2. 🔥【關鍵修正】標籤比對 (Tags)
+    // 如果 tags 裡有 '喜高山'，且產品描述有 '高山'，加分！
+    if (tags && tags.length > 0) {
+        tags.forEach(tag => {
+            // 去掉 "喜" 字 (例如 "喜高山" -> "高山")
+            const keyword = tag.replace(/^喜/, ""); 
+            if (text.includes(keyword)) score += 4;
+        });
+    }
+    
+    // 3. 預算比對
     const budgetNum = parseInt((budget || "9999").replace(/[^\d]/g, ""));
     if (p.price <= budgetNum) score += 3;
-    if (mode === "gift" && target?.includes("長輩") && (text.includes("高山")||text.includes("烏龍"))) score += 3;
+    
+    // 4. 對象比對 (送禮用)
+    if (mode === "gift") {
+      if (target?.includes("長輩") && (text.includes("高山") || text.includes("烏龍"))) score += 3;
+      if (target?.includes("輕熟") && text.includes("美人")) score += 3;
+    }
+
     return { ...p, score };
   });
-  const best = scored[0];
 
-  const soulText = await generateSoulText(client, best, data);
+  // 排序：分數高 -> 低
   scored.sort((a, b) => b.score - a.score);
-  const reason = await generatePersuasiveReason(client, scored[0], data);
+  
+  const best = scored[0];
+  const second = scored[1];
+
+  // 生成文案
+  const reason = await generatePersuasiveReason(client, best, data);
+  
+  // 生成茶籤
+  const soulText = await generateSoulText(client, best, data);
+
+  // 生成語音 (簡短版)
+  const shortSpeech = `這款${best.title}，風味非常符合您的喜好，您可以試試看喔！`;
+  // const audioData = await generateVoice(client, shortSpeech); // 若還沒實作語音可先註解
+
   return {
     mode: mode === "gift" ? "gift" : "recommend",
     best: { id: best.id, reason },
-    second: scored[1] ? { id: scored[1].id, reason: "另一種選擇" } : null,
-    card_text: soulText // 👈 新增這個欄位
+    second: second ? { id: second.id, reason: "另一種選擇" } : null,
+    card_text: soulText,
+    // audio: audioData 
   };
 }
 
