@@ -6,6 +6,15 @@ import express from "express";
 import OpenAI from "openai";
 const router = express.Router();
 
+  // 🤫 隱藏版商品資料 (官網列表沒有的)
+  const HIDDEN_PRODUCT = {
+    id: "secret_888",
+    title: "👑 傳奇・80年代老凍頂",
+    price: 8800,
+    tags: "老饕限定 | 封存40年 | 數量稀少",
+    desc: "這不是普通的茶，這是時光的味道。阿興師爺爺留下來的壓箱寶，只有真正的行家才懂。入口即化的陳年梅香，市面無售。"
+  };
+
 // ============================================================
 // 🧠 0. Session 系統
 // ============================================================
@@ -374,6 +383,23 @@ async function recommendTeaByImage(client, base64Image, products) {
   }
 }
 
+// 🕵️ 隱藏菜單流程
+async function runSecretFlow(session, client) {
+  // 清除狀態，避免卡住
+  session.flow = null;
+  session.step = null;
+
+  return {
+    mode: "masterpick", // 借用店長推薦的 UI，或者你可以新增一個 secret mode
+    best: HIDDEN_PRODUCT.id,
+    // 這裡我們手動組裝一個 fake product 物件傳給前端，因為它不在 config.js 的列表裡
+    // 但為了簡單起見，我們直接回傳內容，前端通常只認 ID
+    // ⚠️ 重要技巧：我們把整顆物件塞進去，前端需要支援 (等下會改前端)
+    tea_data: HIDDEN_PRODUCT, 
+    reason: "噓...小聲點。既然你是內行人，我才把這罐從後面拿出來。這是爺爺留下來的 80 年代老茶，喝一泡少一泡，別讓太多人知道..."
+  };
+}
+
 // 🎭 性格測驗流程
 async function runPersonalityFlow(session, message, products, client) {
   if (!session.step) {
@@ -497,6 +523,15 @@ router.post("/", async (req, res) => {
 
     // 判斷意圖
     let intent = await classifyIntent(client, message);
+
+    // 🕵️【新增】彩蛋攔截邏輯
+    // 條件 1: 關鍵字觸發
+    if (message.includes("隱藏") || message.includes("私房") || message.includes("厲害的")) {
+       console.log("🕵️ 觸發隱藏菜單！");
+       const result = await runSecretFlow(session, client);
+       // 特殊處理：因為前端 products 列表裡沒這項，我們得讓前端知道這是特例
+       return res.json({ ...result, session, isSecret: true });
+    }
     
     // 意圖切換邏輯
     if (intent !== "continue" && intent !== "recommend") {
