@@ -114,15 +114,30 @@ async function extractEntities(client, message, currentData) {
 }
 
 // 🛠️ 1-2. 意圖判斷
-async function classifyIntent(client, message) {
+async function classifyIntent(client, message, session) {
   const msg = message.trim();
+  // 🔥【規則 1】純數字、預算區間 -> continue
   if (/^\$?\d+(-\d+)?\s*$/.test(msg)) return "continue";
 
-  const prompt = `
-  你是祥興茶行的店長。判斷客人的意圖。
-  訊息：「${msg}」
 
-  分類：
+
+  const prompt = `
+  你是祥興茶行的店長。請判斷客人的意圖。
+  
+  【當前對話狀態】
+  - 目前流程 (Flow): ${session.flow || "無 (剛開始)"}
+  - 上一步驟 (Step): ${session.step || "無"}
+  - 已知資訊: ${JSON.stringify(session.data)}
+  
+  【客人最新訊息】
+  「${msg}」
+
+  【判斷邏輯】
+  1. 如果客人的訊息是在 **回答上一步驟的問題** (例如剛問送禮自飲，客人回"自己喝") -> 絕對是 "continue"。
+  2. 如果客人 **明顯想換話題** (例如正在問口味，突然問"怎麼泡") -> 才是 "brew" / "gift" / "pairing" 等。
+  3. 若無法判斷，傾向維持當前流程。
+
+  【分類選項】
   1. personality (測驗、心理測驗、性格茶、玩遊戲)
   2. gift (送禮)
   3. pairing (搭餐)
@@ -565,8 +580,8 @@ router.post("/", async (req, res) => {
       console.log("📝 資訊更新:", session.data);
     }
 
-    // 判斷意圖
-    let intent = await classifyIntent(client, message);
+    // 3. 判斷意圖 (傳入 session，讓 AI 知道上下文)
+    let intent = await classifyIntent(client, message, session);
 
     // 🕵️【新增】彩蛋攔截邏輯
     // 條件 1: 關鍵字觸發
