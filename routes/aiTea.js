@@ -438,7 +438,9 @@ async function generatePersonalityResult(data, products, client) {
     });
     const res = JSON.parse(completion.choices[0].message.content);
     const tea = products.find(p => p.id === res.tea_id) || products[0];
-    return { mode: "personality", tea: tea.id, summary: res.analysis };
+    // 🔥 順便生成茶籤
+    const soulText = await generateSoulText(client, tea, data);
+    return { mode: "personality", tea: tea.id, summary: res.analysis, card_text: soulText };
   } catch(e) {
     return { mode: "personality", tea: products[0].id, summary: "你是一個溫暖的人，這款茶很適合你。" };
   }
@@ -474,6 +476,34 @@ async function runCompareAI(a, b, message, client) {
   }
 }
 
+// 💌 生成靈魂茶籤文案
+async function generateSoulText(client, tea, userState) {
+  const prompt = `
+  你是祥興茶行的阿興師。
+  客人剛選了：${tea.title}
+  客人的狀態/需求：${JSON.stringify(userState)}
+
+  請寫一段「心靈茶籤」送給他。
+  要求：
+  1. 字數 30 字以內，短小精悍，像現代詩或俳句。
+  2. 語氣溫暖、療癒、富有哲理。
+  3. 結合茶的特性（例如：金萱的奶香代表溫柔、鐵觀音的焙火代表歷練）。
+  4. 不要任何解釋，只回傳那段話。
+
+  範例：「生活不必時時刻刻發光。這杯金萱的溫柔奶香，允許你暫時卸下堅強。」
+  `;
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }]
+    });
+    return completion.choices[0].message.content.replace(/"/g, "").trim();
+  } catch (e) {
+    return "茶香是時間的禮物，願這杯茶溫暖你的心。";
+  }
+}
+
 // 🔍 推薦核心 (共用)
 async function runProductRecommendation(mode, data, products, client) {
   const { target, budget, flavor } = data;
@@ -486,9 +516,17 @@ async function runProductRecommendation(mode, data, products, client) {
     if (mode === "gift" && target?.includes("長輩") && (text.includes("高山")||text.includes("烏龍"))) score += 3;
     return { ...p, score };
   });
+  const best = scored[0];
+
+  const soulText = await generateSoulText(client, best, data);
   scored.sort((a, b) => b.score - a.score);
   const reason = await generatePersuasiveReason(client, scored[0], data);
-  return { mode: mode === "gift"?"gift":"recommend", best: { id: scored[0].id, reason }, second: scored[1]?{ id: scored[1].id, reason: "另一種選擇" }:null };
+  return {
+    mode: mode === "gift" ? "gift" : "recommend",
+    best: { id: best.id, reason },
+    second: scored[1] ? { id: scored[1].id, reason: "另一種選擇" } : null,
+    card_text: soulText // 👈 新增這個欄位
+  };
 }
 
 // ============================================================
