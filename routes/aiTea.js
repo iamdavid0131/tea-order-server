@@ -1,5 +1,5 @@
 // ============================================================
-// ⭐ 祥興茶行 AI 導購（多輪對話旗艦版）Part 1 — gpt-4.1-small 版本
+// ⭐ 祥興茶行 AI 導購 — 旗艦完整修正版 (Smart Flow v3.1)
 // ============================================================
 
 import express from "express";
@@ -7,766 +7,398 @@ import OpenAI from "openai";
 const router = express.Router();
 
 // ============================================================
-// 🧠 0. Session 系統（多輪導購核心）
+// 🧠 0. Session 系統
 // ============================================================
-
 function initSession() {
   return {
-    flow: null,
-    step: null,
-    data: {}
+    flow: null,   // gift, recommend, pairing, personality...
+    step: null,   // step status
+    data: {}      // budget, target, flavor...
   };
 }
 
 // ============================================================
-// 🧰 1. 工具：中文/拼音/注音/縮寫 多重別名
+// 🔍 工具：模糊比對產品
 // ============================================================
-
-function buildAliasDict(products) {
-  const dict = {};
-
-  for (const p of products) {
-    const id = p.id;
-    const title = p.title;
-
-    dict[id] = new Set();
-
-    dict[id].add(title);
-    dict[id].add(title.replace(/[茶烏龍高山金萱翠玉四季春頂級福壽]/g, ""));
-    dict[id].add(title.slice(0, 2));
-
-    for (let i = 0; i < title.length - 1; i++) {
-      const seg = title.slice(i, i + 2);
-      if (/^[一-龥]{2}$/.test(seg)) dict[id].add(seg);
-    }
-
-    for (let i = 0; i < title.length - 2; i++) {
-      const seg = title.slice(i, i + 3);
-      if (/^[一-龥]{3}$/.test(seg)) dict[id].add(seg);
-    }
-
-    const pinyin = toPinyin(title);
-    dict[id].add(pinyin);
-    dict[id].add(pinyin.replace(/\s+/g, ""));
-
-    const bopomo = toBopomo(title);
-    dict[id].add(bopomo.replace(/\s+/g, ""));
-
-    const abbr = title
-      .split("")
-      .filter(c => c.charCodeAt(0) < 256)
-      .map(c => c[0])
-      .join("")
-      .toUpperCase();
-
-    if (abbr.length > 1) dict[id].add(abbr);
-
-    const typoMap = {
-      "貴花": "桂花",
-      "阿里珊": "阿里山",
-      "森山": "梨山"
-    };
-    for (const k in typoMap) dict[id].add(k);
-  }
-
-  return dict;
-}
-
-function toPinyin(str) {
-  const map = {
-    "梨": "li", "山": "shan",
-    "桂": "gui", "花": "hua",
-    "阿": "a", "里": "li",
-    "東": "dong", "方": "fang", "美": "mei", "人": "ren",
-    "金": "jin", "萱": "xuan",
-    "翠": "cui", "玉": "yu",
-  };
-  return str.split("").map(ch => map[ch] || "").join(" ");
-}
-
-function toBopomo(str) {
-  const map = {
-    "梨": "ㄌㄧ", "山": "ㄕㄢ",
-    "桂": "ㄍㄨㄟ", "花": "ㄏㄨㄚ",
-    "東": "ㄉㄨㄥ", "方": "ㄈㄤ",
-  };
-  return str.split("").map(ch => map[ch] || "").join(" ");
-}
-
-// ============================================================
-// 🔍 2. Fuzzy：模糊比對
-// ============================================================
-
-function fuzzyMatchProduct(message, products) {
-  const aliasDict = buildAliasDict(products);
-  const cleaned = message.toLowerCase().replace(/\s+/g, "");
-
-  let best = null;
-  let bestScore = 0;
-
-  for (const p of products) {
-    for (const alias of aliasDict[p.id]) {
-      const a = alias.toLowerCase().replace(/\s+/g, "");
-      if (!a) continue;
-
-      let score = 0;
-
-      if (cleaned === a) score = 5;
-      else if (cleaned.includes(a)) score = 4;
-      else if (a.includes(cleaned)) score = 3;
-      else if (cleaned.startsWith(a)) score = 2;
-      else if (a.startsWith(cleaned)) score = 2;
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = p;
-      }
-    }
-  }
-
-  return { best: best || products[0], score: bestScore };
-}
-
-// ============================================================
-// 🧠 3. Intent 分類（small 版）
-// ============================================================
-
-async function classifyIntent(client, message) {
-  const msg = message.trim();
-
-  // 🔥【規則 0】只有純預算（整句都是數字）才 continue
-  if (/^\$?\d+\s*$/.test(msg)) {
-    return "continue";
-  }
-
-  const prompt = `
-  你是祥興茶行的資深侍茶師。請判斷客人的這句話想做什麼。
-  客人說：「${msg}」
+function findProductInMessage(message, products) {
+  const msg = message.replace(/\s+/g, "").toLowerCase();
   
-  分類代碼：
-  1. gift (送禮)
-  2. pairing (搭餐)
-  3. brew (泡法)
-  4. compare (比較)
-  5. recommend (推薦)
-  
-  只回傳分類代碼單字，不要標點符號。
-  `;
+  let bestMatch = null;
+  let maxScore = 0;
 
-  try {
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "user", content: prompt }
-      ]
-    });
-
-    const result = completion.choices[0].message.content?.trim()?.toLowerCase();
-    return ["recommend", "compare", "brew", "gift", "pairing", "continue"]
-      .includes(result)
-      ? result
-      : "recommend";
-  } catch (e) {
-    console.error("意圖分類錯誤:", e);
-    return "recommend"; // 預設回傳
-  }
-}
-
-// ============================================================
-// ⭐ 4. 解析使用者回答
-// ============================================================
-
-// ✨ 新版：使用 LLM 解析回答，支援一次抓多個參數
-// ✨ 修正版：使用標準 Chat Completions API
-async function interpretAnswerWithLLM(client, message, currentData) {
-  const prompt = `
-  使用者正在選購茶葉。目前的已知需求：${JSON.stringify(currentData)}
-  使用者的最新回答：「${message}」
-
-  請從回答中萃取以下資訊（若未提到則回傳 null）：
-  1. target (對象：長輩/年輕人/客戶/自己...)
-  2. budget (預算：數字或區間)
-  3. flavor (口味：清香/焙火/果香/濃郁...)
-  4. purpose (用途：送禮/自飲)
-
-  請直接回傳 JSON 格式：
-  {"target":..., "budget":..., "flavor":..., "purpose":...}
-  `;
-
-  try {
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini", // 建議使用 gpt-4o-mini
-      messages: [
-        { role: "system", content: "你是一個 JSON 資料萃取助手，只回傳 JSON，不要有 Markdown 標記。" },
-        { role: "user", content: prompt }
-      ],
-      response_format: { type: "json_object" } // ✅ 這是正確的標準語法
-    });
-
-    const content = completion.choices[0].message.content;
-    return JSON.parse(content);
-  } catch (e) {
-    console.error("LLM 解析錯誤:", e);
-    return {}; // 失敗時回傳空物件避免當機
-  }
-}
-
-// ✨ 修正版：使用標準 Chat Completions API
-async function generatePersuasiveReason(client, tea, userNeeds) {
-  const prompt = `
-  你是祥興茶行老闆。
-  客人需求：${JSON.stringify(userNeeds)}
-  我們要推薦：${tea.title} (特色：${tea.desc || tea.tags})
-  
-  請用一句話（30字內）告訴客人為什麼這款茶適合他。
-  語氣要溫暖、專業，不要太像機器人。
-  例如：「因為您喜歡花香，這款金萱獨特的奶桂香氣，喝起來非常順口喔！」
-  `;
-
-  try {
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "user", content: prompt }
-      ]
-    });
+  products.forEach(p => {
+    let score = 0;
+    const title = p.title.replace(/\s+/g, "").toLowerCase();
     
-    return completion.choices[0].message.content;
-  } catch (e) {
-    console.error("文案生成錯誤:", e);
-    return "這款茶非常適合您的需求！"; // 降級備案
-  }
-}
-// ============================================================
-// ⭐ 5. Gift Flow（智慧型多輪送禮流程）
-// ============================================================
+    if (msg.includes(title)) score += 10;
+    else if (msg.includes(title.replace(/茶|精選|頂級/g, ""))) score += 5;
+    else if (msg.includes(title.substring(0, 2))) score += 2;
 
-// ⚠️ 注意：參數要加上 client，因為我們要呼叫 OpenAI
-async function runGiftFlow(session, message, products, client) {
-  
-  // 1. 先用 LLM 理解使用者的整句話 (取代原本的 interpretAnswer)
-  //    這能一次抓出：對象、預算、口味
-  const extracted = await interpretAnswerWithLLM(client, message, session.data);
-  
-  // 2. 把抓到的資料合併進 session (保留舊資料，更新新資料)
-  session.data = { ...session.data, ...extracted };
-  
-  console.log("🧠 目前收集到的資料：", session.data);
-
-  // 3. 檢查還缺什麼資料 (Checklist)
-  //    如果資料有了，就自動跳過問答
-  
-  // --- (A) 缺對象？ ---
-  if (!session.data.target) {
-    session.step = "ask_target";
-    return {
-      mode: "ask",
-      ask: "請問想送給誰呢？（例如：長輩、主管、朋友...）",
-      options: ["長輩", "女生", "主管", "同事", "朋友"]
-    };
-  }
-
-  // --- (B) 缺預算？ ---
-  if (!session.data.budget) {
-    session.step = "ask_budget";
-    return {
-      mode: "ask",
-      ask: `了解是要送給${session.data.target}。請問預算大概多少？`,
-      options: ["500 以內", "500–1000", "1000–2000", "不限"]
-    };
-  }
-
-  // --- (C) 缺口味？ ---
-  if (!session.data.flavor) {
-    session.step = "ask_flavor";
-    return {
-      mode: "ask",
-      ask: "那對方平常喜歡什麼口味或香氣？",
-      options: ["清爽", "花香", "果香", "濃郁", "不確定"]
-    };
-  }
-
-  // 4. 資料都齊全了 -> 進入推薦生成
-  //    ⚠️ 這裡要傳入 client 才能寫出動態理由
-  return await runGiftRecommend(session.data, products, client);
-}
-
-
-
-// ============================================================
-// ⭐ 6. Gift Recommend Core (動態理由版)
-// ============================================================
-
-async function runGiftRecommend(data, products, client) {
-  const { target, budget, flavor } = data;
-
-  // ... (這裡保留原本的 findTea 篩選邏輯) ...
-  function findTea(filter) {
-    return products.find(t => {
-      if (filter.target && !filter.target.includes(target)) return false;
-      if (filter.flavor && !filter.flavor.includes(flavor)) return false;
-      if (filter.budget && !filter.budget.includes(budget)) return false;
-      return true;
-    });
-  }
-
-  let tea =
-    findTea({ target: ["主管", "長輩"] }) ||
-    findTea({ flavor: ["花香"] }) ||
-    findTea({ flavor: ["果香"] }) ||
-    findTea({}) ||
-    products[0];
-
-  // 🔥 關鍵修改：讓 LLM 根據「茶」與「客人需求」寫推薦語
-  const reason = await generatePersuasiveReason(client, tea, data);
-
-  return {
-    mode: "gift",
-    tea: tea.id,
-    summary: `為您挑選了最適合${target}的茶款`, // 標題簡單就好
-    reason: reason // 這裡放入 AI 寫的有溫度文案
-  };
-}
-
-// ============================================================
-// ⭐ 7. Pairing Flow（搭餐流程）
-// ============================================================
-
-async function runPairingFlow(session, message, products, client) {
-  const answer = interpretAnswer(message);
-
-  if (!session.step && detectDish(message)) {
-    session.step = "ask_style";
-    session.data.dish = message;
-
-    return {
-      mode: "ask",
-      ask: `了解～${message} 想搭什麼風味的茶？`,
-      options: ["清爽", "解膩", "香氣強", "果香", "不確定"]
-    };
-  }
-
-  if (!session.step) {
-    session.step = "ask_dish";
-    return {
-      mode: "ask",
-      ask: "想搭配什麼料理呢？",
-      options: ["烤鴨", "牛排", "火鍋", "壽司", "炸物", "甜點"]
-    };
-  }
-
-  if (session.step === "ask_dish") {
-    session.data.dish = message;
-    session.step = "ask_style";
-
-    return {
-      mode: "ask",
-      ask: `了解～${message} 想搭什麼風味的茶？`,
-      options: ["清爽", "解膩", "香氣強", "果香", "不確定"]
-    };
-  }
-
-  if (session.step === "ask_style") {
-    session.data.style = answer.value;
-    return runPairingRecommend(session.data, products);
-  }
-}
-// ============================================================
-// ⭐ 8. Pairing 推薦邏輯
-// ============================================================
-
-function runPairingRecommend(data, products) {
-  const dish = data.dish;
-
-  let tea = null;
-
-  const warm = /(雞|薑母鴨|羊肉|燉|湯)/;
-  const heavy = /(牛排|牛肉|燉肉|漢堡|披薩|焗烤|奶油)/;
-  const fresh = /(壽司|生魚|沙拉|輕食)/;
-  const spicy = /(麻辣|辣|川味|韓式)/;
-  const fried = /(炸|酥|脆|唐揚|薯條)/;
-  const sweet = /(甜|蛋糕|餅乾|甜點|可麗餅)/;
-  const hotpot = /(鍋|火鍋|涮|煲)/;
-
-  if (warm.test(dish)) {
-    tea = products.find(t => /紅茶|蜜香|美人/.test(t.title));
-  } else if (heavy.test(dish)) {
-    tea = products.find(t => /濃|焙火|金萱|凍頂/.test(t.title));
-  } else if (fresh.test(dish)) {
-    tea = products.find(t => /清香|高山|梨山|阿里/.test(t.title));
-  } else if (spicy.test(dish)) {
-    tea = products.find(t => /清爽|翠玉|四季春/.test(t.title));
-  } else if (fried.test(dish)) {
-    tea = products.find(t => /清爽|翠玉/.test(t.title));
-  } else if (sweet.test(dish)) {
-    tea = products.find(t => /桂花|茉莉/.test(t.title));
-  } else if (hotpot.test(dish)) {
-    tea = products.find(t => /高山|金萱|清香/.test(t.title));
-  }
-
-  if (!tea) tea = products[0];
-
-  return {
-    mode: "pairing",
-    tea: tea.id,
-    summary: `搭配「${dish}」時，建議選擇 ${tea.title}。`,
-    reason: `${tea.title} 的風味能平衡「${dish}」的料理特性。`
-  };
-}
-
-// ============================================================
-// 🔥 料理偵測器
-// ============================================================
-
-function detectDish(message) {
-  const m = message.replace(/\s+/g, "");
-
-  if (/搭餐|搭配|配茶|想搭|要搭/.test(m)) return false;
-
-  return /(麻油雞|雞肉|雞腿|烤鴨|牛排|牛肉|豬排|豬肉|壽司|魚|蝦|蟹|炸雞|炸物|甜點|蛋糕|餅乾|披薩|火鍋|鍋|湯|煲|炒飯|炒麵)/.test(
-    m
-  );
-}
-
-// ============================================================
-// 🧩 從訊息中抓出有提到的茶款（給 compare 用）
-// ============================================================
-function extractProductsFromMessage(message, products) {
-  const msg = message.replace(/\s+/g, "");
-
-  return products.filter(p => {
-    const full = p.title.replace(/\s+/g, "");
-    const short2 = p.title.slice(0, 2);
-    const trimmed = p.title.replace(/[茶烏龍高山金萱翠玉四季春頂級福壽]/g, "");
-
-    return (
-      msg.includes(full) ||
-      msg.includes(short2) ||
-      (trimmed && msg.includes(trimmed))
-    );
-  });
-}
-
-// ============================================================
-// ⭐ 9. Compare（比較兩款茶）
-// ============================================================
-
-async function runCompareAI(a, b, message, previousTaste, client) {
-  const prompt = `
-  你是祥興茶行的專業茶師，請比較以下兩款茶：
-  A: ${a.title}
-  B: ${b.title}
-  使用者訊息：${message}
-
-  請以以下結構回覆 JSON:
-  {
-    "a": "${a.id}",
-    "b": "${b.id}",
-    "compare": {
-      "aroma": "...",
-      "body": "...",
-      "roast": "...",
-      "price": "...",
-      "summary": "..."
+    if (score > maxScore) {
+      maxScore = score;
+      bestMatch = p;
     }
-  }
+  });
+
+  return maxScore >= 2 ? bestMatch : null;
+}
+
+// ============================================================
+// 🧠 1. LLM 核心大腦
+// ============================================================
+
+// 🛠️ 1-1. 全局資訊萃取
+async function extractEntities(client, message, currentData) {
+  const prompt = `
+  使用者正在與茶行 AI 對話。
+  目前的已知資訊：${JSON.stringify(currentData)}
+  使用者的最新訊息：「${message}」
+
+  請更新或萃取以下資訊（若未提到回傳 null）：
+  1. target (對象)
+  2. budget (預算數字)
+  3. flavor (口味)
+  4. purpose (送禮/自飲)
+  5. dish (搭配料理名稱，如牛排、甜點)
+
+  回傳 JSON。
   `;
 
   try {
     const completion = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "Output valid JSON only." },
+        { role: "system", content: "只回傳 JSON" },
         { role: "user", content: prompt }
       ],
       response_format: { type: "json_object" }
     });
-
     return JSON.parse(completion.choices[0].message.content);
   } catch (e) {
-    console.error("比較功能錯誤:", e);
-    return { mode: "error" };
+    return {};
+  }
+}
+
+// 🛠️ 1-2. 意圖判斷
+async function classifyIntent(client, message) {
+  const msg = message.trim();
+  if (/^\$?\d+(-\d+)?\s*$/.test(msg)) return "continue";
+
+  const prompt = `
+  你是祥興茶行的店長。判斷客人的意圖。
+  訊息：「${msg}」
+
+  分類：
+  1. personality (測驗、心理測驗、性格茶、玩遊戲)
+  2. gift (送禮)
+  3. pairing (搭餐)
+  4. brew (泡法)
+  5. compare (比較)
+  6. recommend (推薦)
+  7. continue (補充資訊、回答問題、純數字)
+
+  只回傳一個英文單字。
+  `;
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }]
+    });
+    const res = completion.choices[0].message.content.trim().toLowerCase();
+    const valid = ["gift", "pairing", "brew", "compare", "recommend", "continue", "personality"];
+    return valid.includes(res) ? res : "recommend"; 
+  } catch (e) {
+    return "recommend";
+  }
+}
+
+// 🛠️ 1-3. 生成有溫度的推薦理由
+async function generatePersuasiveReason(client, tea, userNeeds) {
+  const prompt = `
+  你是祥興茶行第三代傳人「阿興師」。
+  客人需求：${JSON.stringify(userNeeds)}
+  推薦茶款：${tea.title} (描述：${tea.desc || tea.tags})
+
+  請用 30 字以內，溫暖專業的口吻，告訴客人為什麼這款茶適合他。
+  `;
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }]
+    });
+    return completion.choices[0].message.content;
+  } catch (e) {
+    return `這款${tea.title}非常適合您的需求，風味絕佳！`;
   }
 }
 
 // ============================================================
-// ⭐ 10. 多輪泡法（Brew Flow）
+// 🌊 2. Flows (流程邏輯)
 // ============================================================
 
+// 🍵 智慧泡法流程
 async function runBrewFlow(session, message, products) {
-  const { best } = fuzzyMatchProduct(message, products);
+  const matchedTea = findProductInMessage(message, products);
 
-  if (!session.step) {
+  if (!matchedTea) {
     session.step = "ask_which";
     return {
       mode: "ask",
-      ask: "想查哪一款茶的泡法呢？",
-      options: products.map(p => p.title.slice(0, 4))
+      ask: "請問您想了解哪一款茶的沖泡方式呢？",
+      options: products.slice(0, 5).map(p => p.title)
     };
   }
 
-  if (session.step === "ask_which") {
-    const { best } = fuzzyMatchProduct(message, products);
+  const title = matchedTea.title;
+  let temp = "95-100°C";
+  let time = "50-60秒";
 
-    session.step = null;
-    session.flow = null;
-
-    return {
-      mode: "brew",
-      tea: best.id,
-      brew: {
-        hot: "90–95°C，浸泡 50–70 秒。",
-        ice_bath: "熱沖後直接冰鎮 10 分鐘最佳。",
-        cold_brew: "10g 茶葉加入 600ml 冷水，冷藏 6–8 小時。"
-      },
-      tips: "建議使用軟水風味更乾淨。"
-    };
-  }
-}
-
-// ============================================================
-// ⭐ 11. Recommend Flow（一般推薦多輪）
-// ============================================================
-
-// ============================================================
-// ⭐ 11. Recommend Flow（智慧型推薦）
-// ============================================================
-
-async function runRecommendFlow(session, message, products, client) { // 記得加 client
-  // 1. LLM 理解
-  const extracted = await interpretAnswerWithLLM(client, message, session.data);
-  session.data = { ...session.data, ...extracted };
-
-  // 2. 特殊判斷：如果 LLM 發現使用者其實是想送禮，切換跑道
-  if (session.data.purpose === "送禮" || /送禮/.test(message)) {
-    session.flow = "gift";
-    return await runGiftFlow(session, message, products, client);
+  if (title.includes("綠") || title.includes("碧螺春")) {
+    temp = "80-85°C"; time = "40-50秒";
+  } else if (title.includes("東方美人") || title.includes("紅茶")) {
+    temp = "90-95°C"; time = "40-50秒";
   }
 
-  // 3. 檢查缺少的資料
-  
-  // (A) 缺用途？ (如果 LLM 沒抓到，預設問一下，或直接預設為自飲)
-  if (!session.data.purpose) {
-     session.step = "ask_purpose";
-     return {
-       mode: "ask",
-       ask: "這次是自己喝，還是要送禮呢？😊",
-       options: ["自己喝", "送禮"]
-     };
-  }
-
-  // (B) 缺口味？
-  if (!session.data.flavor) {
-    session.step = "ask_flavor";
-    return {
-      mode: "ask",
-      ask: "那你平常喜歡什麼風味呢？(例如：清爽、花香、濃郁)",
-      options: ["清爽", "花香", "果香", "濃郁", "不確定"]
-    };
-  }
-
-  // 4. 資料齊全 -> 推薦
-  //    這裡也可以考慮加上 generatePersuasiveReason，看你想不想讓一般推薦也變聰明
-  //    目前先維持呼叫 Core，但可以把 result 改成 async
-  const result = runRecommendCore(session.data, products);
-  return result;
-}
-
-// ============================================================
-// ⭐ 12. Recommend 核心邏輯
-// ============================================================
-
-function runRecommendCore(data, products) {
-  const { budget, flavor } = data;
-
-  const scored = products.map(p => {
-    let score = 0;
-
-    if (budget) {
-      const num = parseInt(budget.replace(/[^\d]/g, ""), 10);
-      if (p.price && p.price <= num) score += 3;
-      if (p.price && p.price <= num + 200) score += 1;
-    }
-
-    if (/清爽|清香/.test(flavor) && /清香|翠玉|四季春|高山/.test(p.title))
-      score += 3;
-    if (/花香/.test(flavor) && /桂花|茉莉/.test(p.title)) score += 3;
-    if (/果香/.test(flavor) && /蜜香|美人/.test(p.title)) score += 3;
-    if (/濃郁|厚/.test(flavor) && /焙火|濃香|紅茶|凍頂/.test(p.title)) score += 3;
-
-    return { ...p, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-
-  const best = scored[0] || products[0];
-  const second = scored[1] || products[1];
-
-  const reasons = [];
-  if (budget) reasons.push(`符合你設定的「${budget}」預算`);
-  if (flavor) reasons.push(`風味偏向你喜歡的「${flavor}」`);
+  session.step = null; 
+  session.flow = null;
 
   return {
-    mode: "recommend",
-    best: {
-      id: best.id,
-      reason: reasons.join("，")
+    mode: "brew",
+    tea: matchedTea.id,
+    brew: {
+      hot: `水溫 ${temp}，第一泡浸泡 ${time}。`,
+      ice_bath: "熱泡後倒入冰塊杯中，瞬間降溫鎖住香氣。",
+      cold_brew: "1:50 比例冷泡，冷藏 6-8 小時。"
     },
-    second: {
-      id: second.id,
-      reason: "另一個互補風味的選擇"
-    }
+    tips: `阿興師建議：${title.includes("高山") ? "第一泡可以溫潤泡(倒掉)讓茶葉舒展。" : "使用瓷器沖泡最能聚香。"}`
   };
 }
 
+// 🎁 送禮流程
+async function runGiftFlow(session, products, client) {
+  const d = session.data;
+
+  if (!d.target) {
+    session.step = "ask_target";
+    return { mode: "ask", ask: "請問是想送給誰呢？", options: ["長輩", "主管/客戶", "朋友", "女生"] };
+  }
+  if (!d.budget) {
+    session.step = "ask_budget";
+    return { mode: "ask", ask: `送給${d.target}的預算大約是？`, options: ["500元內", "500-1000元", "1000-2000元", "預算不限"] };
+  }
+  if (!d.flavor) {
+    session.step = "ask_flavor";
+    return { mode: "ask", ask: "對方有偏好的口味嗎？", options: ["清爽花香", "濃郁焙火", "不確定/請推薦"] };
+  }
+  return await runProductRecommendation("gift", d, products, client);
+}
+
+// 🍵 一般推薦流程
+async function runRecommendFlow(session, products, client) {
+  const d = session.data;
+
+  if (!d.purpose) {
+    session.step = "ask_purpose";
+    return { mode: "ask", ask: "這次是自己喝，還是要送禮呢？😊", options: ["自己喝", "送禮"] };
+  }
+  if (d.purpose.includes("送禮")) {
+    session.flow = "gift"; 
+    return runGiftFlow(session, products, client);
+  }
+  if (!d.flavor) {
+    session.step = "ask_flavor";
+    return { mode: "ask", ask: "您平常比較喜歡什麼樣的風味？", options: ["清爽/高山氣", "花香/烏龍", "濃郁/焙火", "蜜香/紅茶"] };
+  }
+  return await runProductRecommendation("self", d, products, client);
+}
+
+// 🍽️ 搭餐流程
+async function runPairingFlow(session, products, client) {
+  const d = session.data;
+
+  if (!d.dish) {
+    return {
+      mode: "ask",
+      ask: "今晚想搭配什麼料理呢？（例如：牛排、壽司、甜點...）",
+      options: ["油膩大餐", "精緻甜點", "海鮮/壽司", "炸物"]
+    };
+  }
+  
+  // 簡單搭餐邏輯 (輔助)
+  let tag = "清香";
+  if (/牛|豬|炸|膩/.test(d.dish)) tag = "焙火";
+  if (/甜|糕|餅/.test(d.dish)) tag = "紅茶";
+  if (/魚|鮮|生/.test(d.dish)) tag = "清香";
+
+  const tea = products.find(p => p.tags?.includes(tag) || p.title.includes(tag)) || products[0];
+  const reason = await generatePersuasiveReason(client, tea, { ...d, flavor: tag });
+
+  return {
+    mode: "pairing",
+    tea: tea.id,
+    summary: `搭配「${d.dish}」的最佳選擇`,
+    reason: reason
+  };
+}
+
+// 🎭 性格測驗流程
+async function runPersonalityFlow(session, message, products, client) {
+  if (!session.step) {
+    session.step = "q1";
+    return { mode: "ask", ask: "🌿 放假的時候，你喜歡哪種充電方式？", options: ["往戶外跑/爬山", "在家追劇/睡覺", "找朋友聚餐", "咖啡廳看書"] };
+  }
+  if (session.step === "q1") {
+    session.data.p_q1 = message; session.step = "q2";
+    return { mode: "ask", ask: "壓力大時，你第一直覺會想？", options: ["大吃一頓", "獨處聽音樂", "找人訴苦", "去運動流汗"] };
+  }
+  if (session.step === "q2") {
+    session.data.p_q2 = message; session.step = "q3";
+    return { mode: "ask", ask: "如果你是一種天氣，你覺得是？", options: ["午後陽光", "秋日微風", "雨後霧氣", "夏日艷陽"] };
+  }
+  if (session.step === "q3") {
+    session.data.p_q3 = message;
+    return await generatePersonalityResult(session.data, products, client);
+  }
+}
+
+async function generatePersonalityResult(data, products, client) {
+  const prompt = `
+  我是祥興茶行阿興師。客人性格測驗答案：
+  1.放假:${data.p_q1} 2.壓力:${data.p_q2} 3.天氣:${data.p_q3}
+  請從清單挑選一款最符合他性格的茶：
+  ${products.map(p => `${p.id}:${p.title}(${p.tags})`).join(", ")}
+  
+  回傳 JSON: {"tea_id": "...", "analysis": "50字冷讀術解析"}
+  `;
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" }
+    });
+    const res = JSON.parse(completion.choices[0].message.content);
+    const tea = products.find(p => p.id === res.tea_id) || products[0];
+    return { mode: "personality", tea: tea.id, summary: res.analysis };
+  } catch(e) {
+    return { mode: "personality", tea: products[0].id, summary: "你是一個溫暖的人，這款茶很適合你。" };
+  }
+}
+
+// ⚖️ 比較功能 (補上這個缺失的函式！)
+async function runCompareAI(a, b, message, client) {
+  const prompt = `
+  請比較 A:${a.title} 和 B:${b.title}。
+  使用者問：${message}
+  
+  回傳 JSON:
+  {
+    "a": "${a.id}", "b": "${b.id}",
+    "compare": {
+      "aroma": "A的香氣vsB的香氣",
+      "body": "口感厚度比較",
+      "roast": "焙火程度比較",
+      "price": "價格比較",
+      "summary": "一句話總結差異"
+    }
+  }
+  `;
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" }
+    });
+    return { mode: "compare", ...JSON.parse(completion.choices[0].message.content) };
+  } catch (e) {
+    return { mode: "error", detail: "比較功能忙碌中" };
+  }
+}
+
+// 🔍 推薦核心 (共用)
+async function runProductRecommendation(mode, data, products, client) {
+  const { target, budget, flavor } = data;
+  const scored = products.map(p => {
+    let score = 0;
+    const text = (p.title + p.tags).toLowerCase();
+    if (flavor && text.includes(flavor.replace("不確定", ""))) score += 5;
+    const budgetNum = parseInt((budget || "9999").replace(/[^\d]/g, ""));
+    if (p.price <= budgetNum) score += 3;
+    if (mode === "gift" && target?.includes("長輩") && (text.includes("高山")||text.includes("烏龍"))) score += 3;
+    return { ...p, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const reason = await generatePersuasiveReason(client, scored[0], data);
+  return { mode: mode === "gift"?"gift":"recommend", best: { id: scored[0].id, reason }, second: scored[1]?{ id: scored[1].id, reason: "另一種選擇" }:null };
+}
+
 // ============================================================
-// ⭐ 13. 主路由（dispatcher）
+// 🕹️ 3. Main Router
 // ============================================================
 
 router.post("/", async (req, res) => {
-  console.log("🚀 AI Tea Router — NEW VERSION RUNNING");
-
   try {
-    const { message, products, previousTaste, session: clientSession } = req.body;
-
-    if (!message || !products) {
-      return res.status(400).json({ error: "缺少 message 或 products" });
-    }
-
+    const { message, products, session: clientSession } = req.body;
     const client = new OpenAI({ apiKey: process.env.OPENAI_KEY });
+    let session = clientSession ?? initSession();
 
-    // session init
-    const session = clientSession ?? initSession();
+    // 🚀 優化：只有「不在」性格測驗流程時，才去萃取資訊 (省錢 + 避免誤判)
+    if (session.flow !== "personality") {
+      const extracted = await extractEntities(client, message, session.data);
+      session.data = { ...session.data, ...extracted };
+      console.log("📝 資訊更新:", session.data);
+    }
 
-    const intent = await classifyIntent(client, message);
-
-    console.log("🔍 Intent =", intent);
-
-    // ⛔ 料理 → 直接進 pairing flow
-    if (!session.flow && detectDish(message)) {
-      session.flow = "pairing";
+    // 判斷意圖
+    let intent = await classifyIntent(client, message);
+    
+    // 意圖切換邏輯
+    if (intent !== "continue" && intent !== "recommend") {
+      session.flow = intent;
       session.step = null;
-
-      const result = await runPairingFlow(session, message, products, client);
-      return res.json({ ...result, session });
-    }
-
-    // 🔄 回答上一輪
-    if (
-      intent === "continue" ||
-      (session.flow === "gift" && intent === "gift") ||
-      (session.flow === "pairing" && intent === "pairing") ||
-      (session.flow === "brew" && intent === "brew") ||
-      (session.flow === "recommend" && intent === "recommend")
-    ) {
-    // 🚀 啟動 Gift (或是 continue 裡的 gift)
-      if (intent === "gift" || (session.flow === "gift" && intent === "continue")) { // 邏輯要涵蓋 continue
-        session.flow = "gift";
-        // ⚠️ 傳入 client
-        const result = await runGiftFlow(session, message, products, client);
-        return res.json({ ...result, session });
-      }
-
-      if (session.flow === "pairing") {
-        const result = await runPairingFlow(session, message, products, client);
-        return res.json({ ...result, session });
-      }
-
-      if (session.flow === "brew") {
-        const result = await runBrewFlow(session, message, products);
-        return res.json({ ...result, session });
-      }
-
-      // 🚀 啟動 Recommend
-      if (intent === "recommend" || (session.flow === "recommend" && intent === "continue")) {
-        session.flow = "recommend";
-        // ⚠️ 傳入 client
-        const result = await runRecommendFlow(session, message, products, client);
-        return res.json({ ...result, session });
-      }
-    }
-
-    // 🚀 啟動 Gift
-    if (intent === "gift") {
-      session.flow = "gift";
-      session.step = null;
-
-      const result = await runGiftFlow(session, message, products, client);
-      return res.json({ ...result, session });
-    }
-
-    // 🚀 啟動 Pairing
-    if (intent === "pairing") {
-      session.flow = "pairing";
-      session.step = null;
-
-      const result = await runPairingFlow(session, message, products, client);
-      return res.json({ ...result, session });
-    }
-
-    // 🚀 比較
-    if (intent === "compare") {
-      const found = extractProductsFromMessage(message, products);
-
-      if (found.length >= 2) {
-        const a = found[0];
-        const b = found[1];
-        const result = await runCompareAI(
-          a,
-          b,
-          message,
-          previousTaste,
-          client
-        );
-        return res.json({ ...result, session });
-      }
-
-      const { best } = fuzzyMatchProduct(message, products);
-      const second =
-        products.find(p => p.id !== best.id) || products[0];
-
-      const result = await runCompareAI(
-        best,
-        second,
-        message,
-        previousTaste,
-        client
-      );
-      return res.json({ ...result, session });
-    }
-
-    // 🚀 啟動 Brew（改成多輪）
-    if (intent === "brew") {
-      session.flow = "brew";
-      session.step = null;
-
-      const result = await runBrewFlow(session, message, products);
-      return res.json({ ...result, session });
-    }
-
-    // 🚀 啟動 Recommend（新版多輪）
-    if (intent === "recommend") {
+    } else if (!session.flow) {
       session.flow = "recommend";
-      session.step = null;
-
-      const result = await runRecommendFlow(session, message, products);
-      return res.json({ ...result, session });
     }
 
-    // fallback
-    const { best } = fuzzyMatchProduct(message, products);
+    console.log(`🚀 Flow: ${session.flow} (Intent: ${intent})`);
 
-    return res.json({
-      mode: "recommend",
-      best: { id: best.id, reason: "依你的描述，這款最接近。" },
-      session
-    });
+    let result;
+    switch (session.flow) {
+      case "personality":
+        result = await runPersonalityFlow(session, message, products, client);
+        break;
+      case "gift":
+        result = await runGiftFlow(session, products, client);
+        break;
+      case "pairing":
+        result = await runPairingFlow(session, products, client);
+        break;
+      case "brew":
+        result = await runBrewFlow(session, message, products);
+        break;
+      case "compare":
+        // 簡易抓取兩個商品 (若要更精準可用 extractProductsFromMessage，但此處簡單處理即可)
+        const found = products.filter(p => message.includes(p.title.slice(0,2)));
+        const a = found[0] || products[0];
+        const b = found[1] || products[1];
+        result = await runCompareAI(a, b, message, client);
+        break;
+      case "recommend":
+      default:
+        result = await runRecommendFlow(session, products, client);
+        break;
+    }
+
+    res.json({ ...result, session });
+
   } catch (err) {
-    console.error("AI 導購錯誤：", err);
-
-    return res.status(500).json({
-      mode: "error",
-      detail: err.message
+    console.error("Error:", err);
+    res.status(200).json({ 
+      mode: "recommend", 
+      best: { id: products[0].id, reason: "阿興師現在有點忙，但我私心推薦這款招牌好茶！" },
+      session 
     });
   }
 });
