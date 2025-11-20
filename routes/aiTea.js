@@ -555,7 +555,13 @@ router.post("/", async (req, res) => {
     // 🚀 優化：只有「不在」性格測驗流程時，才去萃取資訊 (省錢 + 避免誤判)
     if (session.flow !== "personality") {
       const extracted = await extractEntities(client, message, session.data);
-      session.data = { ...session.data, ...extracted };
+      // ✅【修正寫法】智慧合併：只有當新資料「有東西」時，才更新 Session
+      Object.entries(extracted).forEach(([key, value]) => {
+        // 只有當 value 不是 null, undefined, 或是空字串時，才更新
+        if (value !== null && value !== undefined && value !== "") {
+          session.data[key] = value;
+        }
+      });
       console.log("📝 資訊更新:", session.data);
     }
 
