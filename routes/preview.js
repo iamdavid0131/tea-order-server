@@ -5,6 +5,12 @@ import { getSheetsClient } from '../lib/sheets.js';
 
 const router = express.Router();
 
+// 🤫 隱藏版商品定義 (必須跟前端一致，這是後端唯一的價格真理)
+const SECRET_PRODUCT = {
+  id: "secret_888",
+  price: 8800
+};
+
 // 🧠 全域快取變數
 let cachedPrices = null;
 let lastFetchTime = 0;
@@ -55,9 +61,19 @@ router.post('/', async (req, res) => {
     // ✅ 從快取（或 Sheets）取得價格表
     const priceMap = await fetchPriceMap();
 
-    // ✅ 計算小計
+    // ✅ 計算小計 (加入隱藏商品判斷)
     const subtotal = items.reduce((sum, it) => {
-      const price = priceMap[it.id] || 0;
+      let price = 0;
+
+      // 🔥 關鍵修改：優先檢查是否為隱藏商品
+      if (it.id === SECRET_PRODUCT.id) {
+        price = SECRET_PRODUCT.price;
+        // console.log(`[preview] Detect secret item, price: ${price}`);
+      } else {
+        // 是一般商品，查表
+        price = priceMap[it.id] || 0;
+      }
+
       return sum + price * (it.qty || 0);
     }, 0);
 
@@ -73,7 +89,9 @@ router.post('/', async (req, res) => {
 
     res.json({
       ok: true,
-      data: { subtotal, discount, totalAfterDiscount, shipping, total },
+      data: { subtotal, discount, totalAfterDiscount, shipping, total }, // 這裡回傳的結構要跟前端對應
+      // 補上這行是為了確保前端能拿到正確的運費欄位名稱 (看你的前端是讀取 shipping 還是 shippingFee)
+      shippingFee: shipping, 
       cache: {
         valid: !!cachedPrices,
         lastFetch: new Date(lastFetchTime).toISOString(),
