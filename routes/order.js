@@ -117,11 +117,17 @@ router.post("/submit", async (req, res) => {
       qty: Number(it.qty) || 0
     }));
 
-    // 忽略隱藏版商品的庫存檢查 (因為它不在庫存表裡)
-    const validStockItems = stockItems.filter(i => i.productId !== SECRET_PRODUCT.id);
+    // 忽略隱藏版商品的庫存檢查
+    const validStockItems = stockItems.filter(i => i.productId !== "secret_888");
 
     if (validStockItems.length > 0) {
-        const stockRes = await fetch(`${process.env.SERVER_URL}/api/stock/deduct`, {
+        // 🔥【關鍵修正】定義伺服器網址
+        // 如果環境變數沒設定，就自動用 Render 的預設網址，或 localhost
+        const baseUrl = process.env.SERVER_URL || "https://tea-order-server.onrender.com"; // 👈 請確認這是你的 Render 網址
+        
+        console.log(`📦 呼叫庫存 API: ${baseUrl}/api/stock/deduct`);
+
+        const stockRes = await fetch(`${baseUrl}/api/stock/deduct`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ items: validStockItems })
