@@ -147,7 +147,8 @@ router.post("/submit", async (req, res) => {
     // =====================================================
     try {
       // 判斷付款狀態文字
-      const payStatusText = order.paymentMethod === "cod" ? "貨到付款" : "待付款 (線上支付)";
+      const isCOD = order.paymentMethod === "cod";
+      const statusTitle = isCOD ? "🟢 貨到付款 (請安排出貨)" : "🟡 線上支付 (等待付款中)";
       
       await sendOrderNotification({
         orderId,
@@ -161,7 +162,7 @@ router.post("/submit", async (req, res) => {
         storeCarrier: order.storeCarrier,
         note: order.note,
         // 稍微修改一下傳進去的標題或備註，讓管理員知道狀態
-        statusRaw: payStatusText 
+        statusRaw: statusTitle
       });
       console.log("📨 訂單通知已發送");
     } catch (e) {
