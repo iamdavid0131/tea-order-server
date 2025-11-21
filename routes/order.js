@@ -4,7 +4,7 @@ import { getSheetsClient } from "../lib/sheets.js";
 import { normalizePhoneTW } from "../lib/utils.js";
 import { sendOrderNotification } from "../lib/notify.js";
 import fetch from "node-fetch";
-
+import { linePush } from "../lib/line.js";
 const router = express.Router();
 
 // 🤫 隱藏版商品定義 (Backend Source of Truth)
@@ -143,6 +143,32 @@ router.post("/submit", async (req, res) => {
     }
 
     // =====================================================
+    // 📨 發送「新訂單」通知 (無論付款方式為何，先通知)
+    // =====================================================
+    try {
+      // 判斷付款狀態文字
+      const payStatusText = order.paymentMethod === "cod" ? "貨到付款" : "待付款 (線上支付)";
+      
+      await sendOrderNotification({
+        orderId,
+        name: order.buyerName,
+        phone: order.buyerPhone,
+        total: order.total,
+        items: order.items,
+        method: order.shippingMethod,
+        address: order.codAddress,
+        storeName: order.storeName,
+        storeCarrier: order.storeCarrier,
+        note: order.note,
+        // 稍微修改一下傳進去的標題或備註，讓管理員知道狀態
+        statusRaw: payStatusText 
+      });
+      console.log("📨 訂單通知已發送");
+    } catch (e) {
+      console.error("通知發送失敗", e);
+    }
+
+    // =====================================================
     // 🔥🔥 線上支付：由後端直接送 HTML 表單
     // =====================================================
     if (order.paymentMethod !== "cod") {
@@ -184,20 +210,7 @@ router.post("/submit", async (req, res) => {
       return res.send(fixedHtml);
     }
 
-    // =====================================================
-    // 🟢 貨到付款
-    // =====================================================
-    await sendOrderNotification({
-      orderId,
-      name: order.buyerName,
-      phone: order.buyerPhone,
-      total: order.total,
-      items: order.items,
-      method: order.shippingMethod,
-      address: order.codAddress,
-      storeName: order.storeName,
-      storeCarrier: order.storeCarrier,
-    });
+ 
 
     // 🔥🔥 重定向回前端成功頁面
     return res.redirect(
@@ -246,6 +259,41 @@ router.post("/payment/callback", async (req, res) => {
           valueInputOption: "USER_ENTERED",
           requestBody: { values: [row] },
         });
+        // 🔥【新增】如果付款成功，發送 LINE 通知給管理員
+      if (status === "paid") {
+        const adminId = process.env.LINE_ADMIN_USER_ID;
+        // 從 Sheet 裡抓出買家姓名 (在第 C 欄，索引 2) 和金額 (在第 AZ 前面幾欄，假設你知道位置)
+        // 或者簡單一點，只通知訂單號
+        const buyerName = rows[idx][2] || "顧客"; 
+        const totalAmount = rows[idx][rows[0].indexOf("Total")] || "0";
+
+        if (adminId) {
+          await linePush(adminId, {
+            type: "bubble", // 簡單的小卡片
+            size: "kilo",
+            body: {
+              type: "box",
+              layout: "vertical",
+              backgroundColor: "#f0fff4", // 淡綠底
+              borderColor: "#48bb78",
+              borderWidth: "2px",
+              cornerRadius: "12px",
+              paddingAll: "16px",
+              contents: [
+                { type: "text", text: "💰 付款成功確認", weight: "bold", color: "#2f855a", size: "md" },
+                { type: "separator", margin: "md" },
+                { type: "text", text: `訂單：${MerchantTradeNo}`, size: "sm", margin: "md" },
+                { type: "text", text: `買家：${buyerName}`, size: "sm", margin: "xs" },
+                { type: "text", text: `金額：$${Number(totalAmount).toLocaleString()}`, size: "lg", weight: "bold", color: "#b8860b", margin: "sm" }
+              ]
+            }
+          });
+          console.log("📨 付款成功通知已發送");
+        }
+      }
+
+        
+        
       }
   
       console.log(`✅ 綠界付款結果回傳：${MerchantTradeNo} (${status})`);
